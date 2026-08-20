@@ -64,6 +64,12 @@ async def serve_frontend():
     with open(index_path, "r") as f:
         return HTMLResponse(content=f.read())
 
+@app.get("/favicon.svg")
+async def serve_favicon():
+    favicon_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend", "favicon.svg")
+    with open(favicon_path, "r") as f:
+        return HTMLResponse(content=f.read(), media_type="image/svg+xml")
+
 @app.get("/health")
 async def health_check():
     return {"status": "ok", "message": "Argus Backend is running."}
