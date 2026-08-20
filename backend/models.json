@@ -1,0 +1,18 @@
+{
+  "providers": [
+    {
+      "name": "Onyx",
+      "api_key": null,
+      "api_type": "openai-completions",
+      "base_url": "http://10.0.2.2:12057/v1",
+      "concurrency": 1,
+      "models": [
+        {
+          "id": "Qwen3.6-35B-A3B",
+          "display_name": "Qwen 3.6 35B A3B",
+          "ctx": 131072
+        }
+      ]
+    }
+  ]
+}
