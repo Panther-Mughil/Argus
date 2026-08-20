@@ -1,0 +1,18 @@
+# Auto detect text files and perform LF normalization
+* text=auto eol=lf
+
+# Explicitly declare text files you want to always be normalized and converted to native line endings on checkout.
+*.py text diff=python
+*.sh text eol=lf
+*.md text
+*.json text
+*.html text
+*.css text
+*.js text
+
+# GitHub Linguist overrides to make Python the primary language
+# We treat the frontend as vendored/generated so it doesn't skew the repository language stats
+frontend/* linguist-vendored
+docs/* linguist-vendored
+*.sh linguist-detectable=false
+*.md linguist-detectable=false
