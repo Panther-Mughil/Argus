@@ -57,3 +57,6 @@ Icon
 
 # Project specific
 argus_postgres_data/
+
+# Planning artifacts
+docs/plans/

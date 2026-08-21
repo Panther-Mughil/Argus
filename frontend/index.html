@@ -101,7 +101,7 @@
     <textarea v-model="newChallenge.description" placeholder="Description & Hints"
               class="w-full bg-cocoa border border-sand/40 rounded p-2 text-cream text-sm resize-none h-24 focus:border-mint focus:ring-1 focus:ring-mint"></textarea>
 </div>
-                        <button type="submit" class="w-full bg-mint text-cocoa font-medium rounded-pill py-2.5 px-4 hover:bg-mint/90 transition">Add Challenge</button>
+                        <button type="submit" class="w-full bg-mint text-cocoa font-medium rounded-lg py-2.5 px-4 hover:bg-mint/90 transition">Add Challenge</button>
                     </form>
                 </div>
             </div>
@@ -128,8 +128,8 @@
 <div class="font-mono font-medium text-cream">Qwen-3.6-35B</div>
                         </div>
                         <div class="flex space-x-2 mt-4">
-                            <button @click="startAgent" v-if="selectedChallenge.status === 'QUEUED'" class="bg-mint text-cocoa font-medium rounded-pill py-2.5 px-6 hover:bg-mint/90 transition">Start Agent</button>
-                            <button @click="stopAgent" v-if="selectedChallenge.status === 'IN_PROGRESS'" class="bg-danger text-cocoa font-medium rounded-pill py-2.5 px-6 hover:bg-danger/90 transition">Stop</button>
+                            <button @click="startAgent" v-if="selectedChallenge.status === 'QUEUED'" class="bg-mint text-cocoa font-medium rounded-lg py-2.5 px-6 hover:bg-mint/90 transition">Start Agent</button>
+                            <button @click="stopAgent" v-if="selectedChallenge.status === 'IN_PROGRESS'" class="bg-danger text-cocoa font-medium rounded-lg py-2.5 px-6 hover:bg-danger/90 transition">Stop</button>
                         </div>
                     </div>
 
@@ -159,7 +159,7 @@
                     <div class="mt-auto pt-4 flex">
 <input v-model="interventionText" @keyup.enter="sendIntervention" type="text" placeholder="Send manual command or hint (Intervene)..."
        class="flex-1 bg-cocoa border border-sand/40 rounded p-2 text-cream font-mono text-sm focus:border-mint focus:ring-1 focus:ring-mint">
-                        <button @click="sendIntervention" class="border border-iris text-iris rounded-pill px-5 py-2.5 hover:bg-iris/10 transition">Send</button>
+                        <button @click="sendIntervention" class="border border-iris text-iris rounded-lg px-5 py-2.5 hover:bg-iris/10 transition">Send</button>
                     </div>
                 </div>
             </div>
