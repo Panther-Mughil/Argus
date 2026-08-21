@@ -15,7 +15,7 @@ async def lifespan(app: FastAPI):
         await conn.run_sync(Base.metadata.create_all)
     yield
 
-app = FastAPI(title="Argus CTF Platform", lifespan=lifespan)
+app = FastAPI(title="Argus", lifespan=lifespan)
 
 # Allow CORS for local frontend development
 app.add_middleware(
@@ -34,6 +34,8 @@ from fastapi import WebSocket, WebSocketDisconnect
 from typing import Dict, List
 
 from .agent.loop import AgentLoop
+
+CHALLENGE_CATEGORIES = {"Web", "Pwn", "Reverse Engineering", "Cryptography", "Forensics", "OSINT", "Misc", "Steganography", "Programming", "Hardware", "Cloud", "Blockchain", "Mobile", "Network", "AI/ML"}
 
 class ConnectionManager:
     def __init__(self):
@@ -82,6 +84,8 @@ async def get_challenges(db: AsyncSession = Depends(get_db)):
 
 @app.post("/api/challenges")
 async def create_challenge(title: str, description: str, category: str, db: AsyncSession = Depends(get_db)):
+    if category not in CHALLENGE_CATEGORIES:
+        raise HTTPException(status_code=400, detail=f"Invalid category. Must be one of: {', '.join(sorted(CHALLENGE_CATEGORIES))}")
     new_challenge = Challenge(
         title=title,
         description=description,
@@ -154,7 +158,7 @@ async def websocket_endpoint(websocket: WebSocket, challenge_id: int):
                 "type": "USER_INTERVENTION",
                 "content": data,
                 "timestamp": "now",
-                "color": "text-pink-400"
+                "color": "text-lavender"
             }
             await manager.broadcast_to_challenge(challenge_id, msg)
             

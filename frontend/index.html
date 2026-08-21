@@ -3,98 +3,163 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Argus CTF Platform</title>
+    <title>Argus</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          cocoa: '#200f0a',
+          plum: '#2b2538',
+          aubergine: '#4d3f3b',
+          cream: '#fcfaf9',
+          sand: '#e3ccc0',
+          stone: '#a69f9d',
+          mint: '#a2f6f5',
+          iris: '#858df9',
+          periwinkle: '#6c74df',
+          lavender: '#b6bbfb',
+          danger: '#ef6a6a'
+        },
+        fontFamily: {
+          sans: ['Inter', 'system-ui', 'sans-serif'],
+          mono: ['"JetBrains Mono"', 'monospace']
+        },
+        borderRadius: {
+          pill: '9999px'
+        },
+        letterSpacing: {
+          mono: '0.06em'
+        }
+      }
+    }
+  }
+</script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet">
 </head>
-<body class="bg-gray-900 text-gray-100 min-h-screen">
-    <div id="app" class="container mx-auto p-4">
-        <header class="flex justify-between items-center py-4 border-b border-gray-700 mb-6">
+<body class="bg-cocoa text-cream font-sans antialiased min-h-screen">
+    <div id="app" class="max-w-[1200px] mx-auto px-6 py-8">
+        <header class="flex justify-between items-center py-4 border-b border-sand/30 mb-6">
             <div class="flex items-center space-x-3">
                 <img src="/favicon.svg" alt="Argus Logo" class="w-10 h-10">
-                <h1 class="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-green-400 to-cyan-500">Argus Command Center</h1>
+                <h1 class="text-2xl font-medium tracking-[0.02em] text-cream">Argus</h1>
             </div>
-            <div class="text-sm">Team: <span class="font-bold">Mughil's Team</span></div>
+            
         </header>
 
         <main class="grid grid-cols-1 md:grid-cols-3 gap-6">
             <!-- Challenge List Panel -->
-            <div class="col-span-1 bg-gray-800 p-4 rounded-lg shadow-lg">
-                <h2 class="text-xl font-semibold mb-4 border-b border-gray-700 pb-2">Challenges</h2>
+            <div class="col-span-1 bg-plum rounded-lg border border-sand/30 p-6">
+                <h2 class="text-xl font-light text-cream mb-4 pb-2 border-b border-sand/20">Challenges</h2>
+
+                <div v-if="challenges.length === 0" class="text-stone italic mb-4">No challenges found.</div>
                 
-                <div v-if="challenges.length === 0" class="text-gray-400 italic mb-4">No challenges found.</div>
-                
-                <div v-for="challenge in challenges" :key="challenge.id" 
-                     class="bg-gray-700 p-3 rounded mb-2 cursor-pointer hover:bg-gray-600 transition flex justify-between items-start"
-                     @click="selectChallenge(challenge)">
+<div v-for="challenge in challenges" :key="challenge.id"
+     class="bg-aubergine rounded-lg border border-sand/20 p-3 mb-3 cursor-pointer hover:bg-aubergine/80 transition flex justify-between items-start"
+     @click="selectChallenge(challenge)">
                     <div class="flex-1">
                         <div class="flex justify-between items-center pr-2">
-                            <h3 class="font-bold text-blue-300">{{ challenge.title }}</h3>
-                            <span class="text-xs px-2 py-1 bg-blue-900 text-blue-100 rounded">{{ challenge.status }}</span>
+                            <h3 class="font-medium text-cream">{{ challenge.title }}</h3>
+                            <span class="text-xs px-2 py-1 rounded-pill font-mono tracking-mono" :class="statusClasses[challenge.status]">{{ challenge.status }}</span>
                         </div>
-                        <p class="text-sm text-gray-400 mt-1 truncate">{{ challenge.category }}</p>
+                        <p class="text-xs font-mono tracking-mono text-stone bg-cocoa/50 border border-sand/20 rounded-pill px-2 py-0.5 mt-1 truncate">{{ challenge.category }}</p>
                     </div>
-                    <button @click.stop="deleteChallenge(challenge.id)" class="text-gray-400 hover:text-red-500 transition px-2" title="Delete Challenge">
+                    <button @click.stop="deleteChallenge(challenge.id)" class="text-stone hover:text-danger transition px-2" title="Delete Challenge">
                         ✖
                     </button>
                 </div>
 
-                <div class="mt-6 pt-4 border-t border-gray-700">
-                    <h3 class="font-semibold mb-2">Create New Challenge</h3>
+                <div class="mt-6 pt-4 border-t border-sand/20">
+                    <div class="font-mono text-xs uppercase tracking-mono text-mint mb-1">NEW CHALLENGE</div>
+<h3 class="text-lg font-medium text-cream mb-2">Create New Challenge</h3>
+<div class="border-t border-sand/20 mb-4"></div>
                     <form @submit.prevent="createChallenge" class="space-y-2">
-                        <input v-model="newChallenge.title" type="text" placeholder="Challenge Title" required 
-                               class="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white">
-                        <input v-model="newChallenge.category" type="text" placeholder="Category (e.g., Web, Pwn)" 
-                               class="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white">
-                        <textarea v-model="newChallenge.description" placeholder="Description & Hints" 
-                               class="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white text-sm h-20"></textarea>
-                        <button type="submit" class="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded transition">
-                            Add Challenge
-                        </button>
+<div class="mb-4">
+    <label class="block text-sm font-medium text-cream mb-1.5">Title</label>
+    <input v-model="newChallenge.title" type="text" placeholder="Challenge Title" required
+           class="w-full bg-cocoa border border-sand/40 rounded p-2 text-cream focus:border-mint focus:ring-1 focus:ring-mint">
+</div>
+<div class="mb-4">
+    <label class="block text-sm font-medium text-cream mb-1.5">Category <span class="text-mint">*</span></label>
+    <div class="relative">
+        <select v-model="newChallenge.category" required
+                class="w-full bg-cocoa border border-sand/40 rounded p-2 text-cream appearance-none focus:border-mint focus:ring-1 focus:ring-mint">
+            <option v-for="category in CHALLENGE_CATEGORIES" :key="category" :value="category">{{ category }}</option>
+        </select>
+        <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-mint">
+            <svg class="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
+                <path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/>
+            </svg>
+        </div>
+    </div>
+</div>
+<div class="mb-4">
+    <label class="block text-sm font-medium text-cream mb-1.5">Description</label>
+    <textarea v-model="newChallenge.description" placeholder="Description & Hints"
+              class="w-full bg-cocoa border border-sand/40 rounded p-2 text-cream text-sm resize-none h-24 focus:border-mint focus:ring-1 focus:ring-mint"></textarea>
+</div>
+                        <button type="submit" class="w-full bg-mint text-cocoa font-medium rounded-pill py-2.5 px-4 hover:bg-mint/90 transition">Add Challenge</button>
                     </form>
                 </div>
             </div>
 
             <!-- Agent Investigation Panel -->
-            <div class="col-span-1 md:col-span-2 bg-gray-800 p-4 rounded-lg shadow-lg flex flex-col h-[80vh]">
-                <h2 class="text-xl font-semibold mb-4 border-b border-gray-700 pb-2">
-                    Active Investigation
-                    <span v-if="selectedChallenge" class="text-blue-400 text-sm ml-2">- {{ selectedChallenge.title }}</span>
-                </h2>
+            <div class="col-span-1 md:col-span-2 bg-plum rounded-lg border border-sand/30 p-6 flex flex-col h-[80vh]">
+<div class="font-mono text-xs uppercase tracking-mono text-mint mb-1">ACTIVE INVESTIGATION</div>
+<h2 class="text-xl font-light text-cream mb-4 pb-2 border-b border-sand/20">
+    Active Investigation
+    <span v-if="selectedChallenge" class="text-mint text-sm ml-1">- {{ selectedChallenge.title }}</span>
+</h2>
 
-                <div v-if="!selectedChallenge" class="flex-1 flex items-center justify-center text-gray-500">
+                <div v-if="!selectedChallenge" class="flex-1 flex items-center justify-center text-stone">
                     Select a challenge to view or start an investigation.
                 </div>
 
                 <div v-else class="flex-1 flex flex-col space-y-4 overflow-hidden">
                     <!-- Agent Info & Controls -->
-                    <div class="flex justify-between items-center bg-gray-700 p-3 rounded">
+                    <div class="bg-aubergine rounded-lg border border-sand/20 p-3 mb-4">
                         <div>
-                            <span class="text-sm text-gray-400">Agent: </span><span class="font-bold">Primary Solver</span><br>
-                            <span class="text-sm text-gray-400">Model: </span><span class="font-bold">Qwen-3.6-35B</span>
+                            <div class="font-mono text-xs uppercase tracking-mono text-stone mb-1">AGENT</div>
+<div class="font-medium text-cream mb-2">Primary Solver</div>
+                            <div class="font-mono text-xs uppercase tracking-mono text-stone mb-1">MODEL</div>
+<div class="font-mono font-medium text-cream">Qwen-3.6-35B</div>
                         </div>
-                        <div class="space-x-2">
-                            <button @click="startAgent" v-if="selectedChallenge.status === 'QUEUED'" class="bg-blue-600 hover:bg-blue-500 text-white py-1 px-3 rounded text-sm transition">Start Agent</button>
-                            <button @click="stopAgent" v-if="selectedChallenge.status === 'IN_PROGRESS'" class="bg-red-600 hover:bg-red-500 text-white py-1 px-3 rounded text-sm transition">Stop</button>
+                        <div class="flex space-x-2 mt-4">
+                            <button @click="startAgent" v-if="selectedChallenge.status === 'QUEUED'" class="bg-mint text-cocoa font-medium rounded-pill py-2.5 px-6 hover:bg-mint/90 transition">Start Agent</button>
+                            <button @click="stopAgent" v-if="selectedChallenge.status === 'IN_PROGRESS'" class="bg-danger text-cocoa font-medium rounded-pill py-2.5 px-6 hover:bg-danger/90 transition">Stop</button>
                         </div>
                     </div>
 
                     <!-- Live Terminal/Event Stream -->
-                    <div class="flex-1 bg-black border border-gray-600 rounded p-4 font-mono text-sm overflow-y-auto" id="terminal">
-                        <div v-if="logs.length === 0" class="text-gray-500 italic">No agent logs yet. Click 'Start Agent'.</div>
+                    <div class="flex-1 bg-cocoa border border-sand/30 rounded-lg font-mono text-[13px] leading-relaxed overflow-y-auto p-4" id="terminal">
+<style>
+    #terminal::-webkit-scrollbar {
+        width: 6px;
+    }
+    #terminal::-webkit-scrollbar-track {
+        background: #200f0a;
+    }
+    #terminal::-webkit-scrollbar-thumb {
+        background: #a69f9d;
+        border-radius: 3px;
+    }
+</style>
+                        <div v-if="logs.length === 0" class="text-stone italic">No agent logs yet. Click 'Start Agent'.</div>
                         <div v-for="(log, idx) in logs" :key="idx" class="mb-1">
-                            <span class="text-gray-500 text-xs mr-2">[{{ log.timestamp }}]</span>
+                            <span class="text-stone text-xs mr-2">[{{ log.timestamp }}]</span>
                             <span :class="log.color + ' font-bold mr-2'">[{{ log.type }}]</span>
-                            <span class="text-gray-300 whitespace-pre-wrap">{{ log.content }}</span>
+                            <span class="text-cream/80 whitespace-pre-wrap">{{ log.content }}</span>
                         </div>
                     </div>
                     
                     <!-- Human Intervention Input -->
-                    <div class="mt-auto pt-2 flex">
-                        <input v-model="interventionText" @keyup.enter="sendIntervention" type="text" placeholder="Send manual command or hint (Intervene)..." 
-                               class="flex-1 bg-gray-900 border border-gray-600 rounded-l p-2 text-white font-mono text-sm">
-                        <button @click="sendIntervention" class="bg-gray-600 hover:bg-gray-500 text-white px-4 rounded-r font-bold transition">Send</button>
+                    <div class="mt-auto pt-4 flex">
+<input v-model="interventionText" @keyup.enter="sendIntervention" type="text" placeholder="Send manual command or hint (Intervene)..."
+       class="flex-1 bg-cocoa border border-sand/40 rounded p-2 text-cream font-mono text-sm focus:border-mint focus:ring-1 focus:ring-mint">
+                        <button @click="sendIntervention" class="border border-iris text-iris rounded-pill px-5 py-2.5 hover:bg-iris/10 transition">Send</button>
                     </div>
                 </div>
             </div>
@@ -107,8 +172,17 @@
         createApp({
             setup() {
                 const challenges = ref([])
+const CHALLENGE_CATEGORIES = ['Web', 'Pwn', 'Reverse Engineering', 'Cryptography', 'Forensics', 'OSINT', 'Misc', 'Steganography', 'Programming', 'Hardware', 'Cloud', 'Blockchain', 'Mobile', 'Network', 'AI/ML']
+const statusClasses = {
+    QUEUED: 'bg-plum text-stone border border-sand/30',
+    IN_PROGRESS: 'bg-mint/10 text-mint border border-mint/40',
+    BLOCKED: 'bg-lavender/10 text-lavender border border-lavender/40',
+    SOLVED: 'bg-mint text-cocoa border border-mint',
+    FAILED: 'bg-aubergine text-cream/60 border border-sand/30'
+}
+const newChallenge = ref({ title: '', category: CHALLENGE_CATEGORIES[0], description: '' })
                 const selectedChallenge = ref(null)
-                const newChallenge = ref({ title: '', category: '', description: '' })
+                
                 const logs = ref([])
                 const interventionText = ref('')
                 let ws = null
@@ -135,7 +209,7 @@
                         await fetch(`${API_BASE}/challenges?title=${encodeURIComponent(newChallenge.value.title)}&category=${encodeURIComponent(newChallenge.value.category)}&description=${encodeURIComponent(newChallenge.value.description)}`, {
                             method: 'POST'
                         })
-                        newChallenge.value = { title: '', category: '', description: '' }
+                        newChallenge.value = { title: '', category: CHALLENGE_CATEGORIES[0], description: '' }
                         await fetchChallenges()
                     } catch (e) {
                         console.error("Failed to create challenge", e)
@@ -225,6 +299,8 @@
                     newChallenge,
                     logs,
                     interventionText,
+                    CHALLENGE_CATEGORIES,
+                    statusClasses,
                     createChallenge,
                     selectChallenge,
                     startAgent,

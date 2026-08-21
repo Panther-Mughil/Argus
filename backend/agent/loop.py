@@ -55,7 +55,7 @@ class AgentLoop:
         self.container_id = None
         self.model = "Qwen3.6-35B-A3B"
 
-    async def _emit(self, event_type: str, content: str, color: str = "text-gray-300"):
+    async def _emit(self, event_type: str, content: str, color: str = "text-cream"):
         timestamp = datetime.utcnow().strftime("%H:%M:%S")
         message = {
             "type": event_type,
@@ -67,17 +67,17 @@ class AgentLoop:
 
     async def run(self):
         self.running = True
-        await self._emit("SYSTEM", "Agent initializing sandbox...", "text-green-500")
+        await self._emit("SYSTEM", "Agent initializing sandbox...", "text-mint")
         
         try:
             self.container_id = self.sandbox.create_sandbox(str(self.challenge_id))
-            await self._emit("SYSTEM", f"Sandbox created ({self.container_id[:8]}). Starting investigation.", "text-green-500")
+            await self._emit("SYSTEM", f"Sandbox created ({self.container_id[:8]}). Starting investigation.", "text-mint")
             
             while self.running:
-                await self._emit("SYSTEM", f"Waiting for model queue lock (concurrency)...", "text-gray-500")
+                await self._emit("SYSTEM", f"Waiting for model queue lock (concurrency)...", "text-stone")
                 await qwen_scheduler.acquire()
                 try:
-                    await self._emit("PLAN", "Thinking...", "text-blue-400")
+                    await self._emit("PLAN", "Thinking...", "text-lavender")
                     response = await generate_chat_completion(self.model, self.messages, TOOLS)
                 finally:
                     qwen_scheduler.release()
@@ -85,7 +85,7 @@ class AgentLoop:
                 if not self.running: break
                 
                 if not response or "choices" not in response:
-                    await self._emit("SYSTEM", "Error: No response from LLM.", "text-red-500")
+                    await self._emit("SYSTEM", "Error: No response from LLM.", "text-danger")
                     break
                     
                 choice = response["choices"][0]
@@ -96,10 +96,10 @@ class AgentLoop:
                 
                 # Handle reasoning (Qwen A3B deep think)
                 if message.get("reasoning_content"):
-                    await self._emit("HYPOTHESIS", message["reasoning_content"].strip(), "text-purple-400")
+                    await self._emit("HYPOTHESIS", message["reasoning_content"].strip(), "text-iris")
                 
                 if message.get("content"):
-                    await self._emit("OBSERVATION", message["content"].strip(), "text-gray-300")
+                    await self._emit("OBSERVATION", message["content"].strip(), "text-cream")
                 
                 if choice["finish_reason"] == "tool_calls":
                     for tool_call in message["tool_calls"]:
@@ -108,7 +108,7 @@ class AgentLoop:
                         
                         if fn_name == "execute_command":
                             cmd = fn_args["command"]
-                            await self._emit("ACTION", f"$ {cmd}", "text-yellow-400")
+                            await self._emit("ACTION", f"$ {cmd}", "text-sand")
                             
                             # Run in sandbox
                             # Offload blocking sandbox call to a thread so we don't block asyncio event loop
@@ -119,7 +119,7 @@ class AgentLoop:
                             if len(out) > 3000:
                                 out = out[:1500] + "\n...[TRUNCATED]...\n" + out[-1500:]
                                 
-                            await self._emit("OBSERVATION", out if out.strip() else "[No output]", "text-gray-400")
+                            await self._emit("OBSERVATION", out if out.strip() else "[No output]", "text-stone")
                             
                             self.messages.append({
                                 "role": "tool",
@@ -129,7 +129,7 @@ class AgentLoop:
                             
                         elif fn_name == "submit_flag":
                             flag = fn_args["flag"]
-                            await self._emit("SYSTEM", f"Agent submitted flag: {flag}", "text-green-500")
+                            await self._emit("SYSTEM", f"Agent submitted flag: {flag}", "text-mint")
                             self.messages.append({
                                 "role": "tool",
                                 "tool_call_id": tool_call["id"],
@@ -139,15 +139,15 @@ class AgentLoop:
                             break
 
         except Exception as e:
-            await self._emit("SYSTEM", f"Agent Error: {str(e)}", "text-red-500")
+            await self._emit("SYSTEM", f"Agent Error: {str(e)}", "text-danger")
             print(f"Agent Loop Error: {e}")
             
         finally:
             if self.container_id:
-                await self._emit("SYSTEM", "Cleaning up sandbox...", "text-gray-500")
+                await self._emit("SYSTEM", "Cleaning up sandbox...", "text-stone")
                 await asyncio.to_thread(self.sandbox.stop_sandbox, self.container_id)
             
-            await self._emit("SYSTEM", "Agent finished execution.", "text-green-500")
+            await self._emit("SYSTEM", "Agent finished execution.", "text-mint")
             self.running = False
             
             # Update DB
