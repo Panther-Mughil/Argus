@@ -1,17 +1,27 @@
 import json
+from pathlib import Path
+from typing import Optional
+
 import httpx
-import os
 
 # Load models config
-config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models.json")
-with open(config_path, "r") as f:
-    MODELS_CONFIG = json.load(f)
+MODELS_CONFIG_PATH = Path(__file__).resolve().parent.parent / "models.json"
+
+
+def _load_models_config() -> dict:
+    try:
+        return json.loads(MODELS_CONFIG_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as e:
+        raise RuntimeError(f"Failed to load models config from {MODELS_CONFIG_PATH}: {e}") from e
+
+
+MODELS_CONFIG = _load_models_config()
 
 # Find the Onyx provider
 onyx_provider = next(p for p in MODELS_CONFIG["providers"] if p["name"] == "Onyx")
 BASE_URL = onyx_provider["base_url"]
 
-async def generate_chat_completion(model: str, messages: list, tools: list = None):
+async def generate_chat_completion(model: str, messages: list, tools: Optional[list] = None):
     """
     Calls the local OpenAI-compatible endpoint.
     """

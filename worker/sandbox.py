@@ -1,65 +1,125 @@
-import os
-from podman import PodmanClient
+from typing import Optional
+
+import logging
+
+import paramiko
+
+from backend.config import settings
+
+logger = logging.getLogger(__name__)
+
 
 class SandboxManager:
-    def __init__(self, uri="unix:///run/user/1000/podman/podman.sock"):
-        # Connect to rootless podman socket
-        # Note: the UID might be different, but 1000 is default for the first user
+    """Connects to the shared Kali forensics container via direct SSH.
+
+    Replaces the previous podman-based sandbox manager.  The Kali container
+    (*kali-forensics*) is always running; the manager opens and closes SSH
+    connections into it on demand.
+    """
+
+    def __init__(self) -> None:
+        self._client: Optional[paramiko.SSHClient] = None
+
+    # ------------------------------------------------------------------
+    # Connection helpers
+    # ------------------------------------------------------------------
+
+    def connect(self) -> None:
+        """Open a persistent SSH connection to the container.
+
+        Raises ``ConnectionError`` with a human-readable message if the
+        container cannot be reached.
+        """
+        if self._client is not None:
+            # Already connected – just verify the transport is alive.
+            if not self._client.get_transport():
+                self._client.close()
+                self._client = None
+
+        if self._client is None:
+            client = paramiko.SSHClient()
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            key_path = settings.resolved_ssh_key_path
+            try:
+                client.connect(
+                    hostname=settings.ARGUS_CONTAINER_HOST,
+                    port=settings.ARGUS_CONTAINER_PORT,
+                    username=settings.ARGUS_CONTAINER_USER,
+                    key_filename=key_path,
+                    timeout=10,
+                )
+            except Exception as exc:
+                raise ConnectionError(
+                    f"Sandbox unreachable: is kali-forensics running and "
+                    f"reachable at {settings.ARGUS_CONTAINER_HOST}:{settings.ARGUS_CONTAINER_PORT}? "
+                    f"({exc})"
+                ) from exc
+            self._client = client
+
+    def ping(self) -> bool:
+        """Quick connectivity check."""
         try:
-            self.uid = os.getuid()
-        except AttributeError:
-            self.uid = 1000
-        
-        # Override uri if default is requested but uid is different
-        if uri.startswith("unix:///run/user/1000") and self.uid != 1000:
-            uri = f"unix:///run/user/{self.uid}/podman/podman.sock"
-            
-        self.uri = uri
+            self.connect()
+            if self._client is None:
+                return False
+            _, stdout, _ = self._client.exec_command("echo ok", timeout=5)
+            return stdout.read().decode().strip() == "ok"
+        except Exception:
+            return False
 
-    def ping(self):
-        with PodmanClient(base_url=self.uri) as client:
-            return client.ping()
+    def ensure_connected(self) -> None:
+        """Alias for ``connect()`` (used by the agent loop)."""
+        self.connect()
 
-    def create_sandbox(self, challenge_id: str, allowed_urls: list = None):
+    # ------------------------------------------------------------------
+    # Command execution
+    # ------------------------------------------------------------------
+
+    def execute_command(self, container_id: str, cmd: str) -> dict:
+        """Execute *cmd* inside the container and return exit_code + output.
+
+        Parameters
+        ----------
+        container_id:
+            Ignored for direct-SSH mode (there is only one container), but
+            kept for API compatibility.
+        cmd:
+            Shell command to run.
+
+        Returns
+        -------
+        dict with keys ``exit_code`` (int) and ``output`` (str).
         """
-        Spawns a rootless Podman container for the agent to use.
+        self.connect()
+        if self._client is None:
+            raise RuntimeError("SSH client is not connected")
+        timeout = settings.ARGUS_CONTAINER_CMD_TIMEOUT
+        stdin, stdout, stderr = self._client.exec_command(cmd, timeout=timeout)
+        exit_code = stdout.channel.recv_exit_status()
+        output = stdout.read().decode("utf-8", errors="replace")
+        return {
+            "exit_code": exit_code,
+            "output": output,
+        }
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
+
+    def stop_sandbox(self, container_id: str) -> None:
+        """Close the SSH connection.
+
+        *Never* stops or removes the container — it is a shared,
+        always-on forensics environment.
         """
-        with PodmanClient(base_url=self.uri) as client:
-            # We use a lightweight kalilinux image, but for MVP let's use a basic python image or alpine
-            # In real CTF scenarios we would build a custom kali image.
-            image_name = "docker.io/library/alpine:latest"
-            
-            # Ensure image exists
-            if not client.images.exists(image_name):
-                client.images.pull(image_name)
+        self.disconnect()
 
-            # Define container configurations for security
-            container_name = f"argus-sandbox-{challenge_id}"
-            
-            # TODO: Configure strict networking based on allowed_urls
-            # TODO: Mount tmpfs for /workspace
-            
-            container = client.containers.create(
-                image_name,
-                command=["sleep", "infinity"],
-                name=container_name,
-                remove=True, # Auto-remove when stopped
-                # read_only=True, # Prevent modifying root fs
-            )
-            container.start()
-            return container.id
-
-    def execute_command(self, container_id: str, cmd: str):
-        with PodmanClient(base_url=self.uri) as client:
-            container = client.containers.get(container_id)
-            # Execute command inside container
-            exec_id = container.exec_run(cmd=cmd, tty=True)
-            return {
-                "exit_code": exec_id.exit_code,
-                "output": exec_id.output.decode("utf-8", errors="replace") if exec_id.output else ""
-            }
-    
-    def stop_sandbox(self, container_id: str):
-        with PodmanClient(base_url=self.uri) as client:
-            container = client.containers.get(container_id)
-            container.stop()
+    def disconnect(self) -> None:
+        """Explicitly close the SSH connection."""
+        client, self._client = self._client, None
+        if client is not None:
+            try:
+                client.close()
+            except Exception as exc:
+                # Connection may already be gone — nothing to recover.
+                logger.debug("Ignoring error while closing SSH transport: %s", exc)

@@ -8,8 +8,8 @@
       "concurrency": 1,
       "models": [
         {
-          "id": "Qwen3.6-35B-A3B",
-          "display_name": "Qwen 3.6 35B A3B",
+          "id": "gpt-oss-20B",
+          "display_name": "GPT-OSS 20B",
           "ctx": 131072
         }
       ]

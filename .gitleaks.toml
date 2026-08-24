@@ -1,0 +1,10 @@
+# Argus local gitleaks configuration.
+# The `keys/` and `keys-ops/` directories hold intentionally gitignored,
+# locally-generated SSH material (see .gitignore) — they are never committed.
+title = "Argus local gitleaks config"
+
+[allowlist]
+paths = [
+    '''keys/''',
+    '''keys-ops/''',
+]

@@ -1,4 +1,5 @@
 # Dashlane — Style Reference
+>
 > Midnight vault with mint keyholes.
 
 **Theme:** dark
@@ -8,7 +9,7 @@ Dashlane is a dark, warm-toned security interface — a near-black cocoa canvas 
 ## Colors
 
 | Name | Value | Role |
-|------|-------|------|
+| ------ | ------- | ------ |
 | Cocoa Black | `#200f0a` | Page background, primary text on light surfaces — the warm near-black base; it has subtle brown warmth that distinguishes it from pure black and pairs with mint without vibrating |
 | Cream Mist | `#fcfaf9` | Primary body and heading text on dark surfaces, icon fills — soft off-white that reads as paper against cocoa |
 | Warm Sand | `#e3ccc0` | Hairline borders on cards and nav, subtle dividers — beige linework that defines edges without harshness |
@@ -23,7 +24,8 @@ Dashlane is a dark, warm-toned security interface — a near-black cocoa canvas 
 
 ## Typography
 
-### Saans — All interface and display type — a custom geometric sans where weight 300 carries all headlines and hero statistics while weight 500 is reserved for UI chrome (buttons, nav, labels, body). The whisper-weight headlines are the system's most distinctive move: 100px at weight 300 reads as architectural light, not aggressive marketing.
+### Saans — All interface and display type — a custom geometric sans where weight 300 carries all headlines and hero statistics while weight 500 is reserved for UI chrome (buttons, nav, labels, body). The whisper-weight headlines are the system's most distinctive move: 100px at weight 300 reads as architectural light, not aggressive marketing
+
 - **Substitute:** Inter, Söhne, or GT America — any clean geometric sans that ships with true weight 300 and 500
 - **Weights:** 300, 500
 - **Sizes:** 12, 14, 16, 18, 28, 36, 48, 56, 72, 100px
@@ -32,6 +34,7 @@ Dashlane is a dark, warm-toned security interface — a near-black cocoa canvas 
 - **OpenType features:** `"ss01" on, "tnum" on`
 
 ### SaansMono — Monospace utility — tracking at 0.06em gives it an uppercase tag/label feel, used for overline metadata, tags, and monospaced code-adjacent labels
+
 - **Substitute:** JetBrains Mono, IBM Plex Mono
 - **Weights:** 300
 - **Sizes:** 16px
@@ -41,7 +44,7 @@ Dashlane is a dark, warm-toned security interface — a near-black cocoa canvas 
 ### Type Scale
 
 | Role | Size | Line Height | Letter Spacing |
-|------|------|-------------|----------------|
+| ------ | ------ | ------------- | ---------------- |
 | caption | 12px | 1.5 | 0.24px |
 | body-sm | 14px | 1.5 | 0.14px |
 | body | 16px | 1.5 | 0.16px |
@@ -74,66 +77,79 @@ Dashlane is a dark, warm-toned security interface — a near-black cocoa canvas 
 ## Components
 
 ### Mint Filled Button
+
 **Role:** Primary action — 'Contact Sales', 'Book a meeting'
 
 Pill shape (9999px radius), background #a2f6f5 (Mint Keyhole), text in #200f0a (Cocoa Black), Saans weight 500, 14-16px, padding 12px 24px. The high-contrast mint-on-cocoa click target reads as a physical key against the dark vault.
 
 ### Violet Outlined Button
+
 **Role:** Secondary action — 'Request a demo'
 
 Pill shape (9999px radius), transparent background, 1px border in #858df9 (Iris), text in #858df9, Saans weight 500, padding 12px 24px. The outlined violet is the system's second voice for paired CTAs.
 
 ### Ghost Text Button
+
 **Role:** Tertiary action — nav links, 'See customer stories'
 
 Pill or near-pill, no border, no fill, text in #fcfaf9 or #a2f6f5, Saans weight 500, padding 8px 16px. Used for low-emphasis actions inside paragraphs and cards.
 
 ### Stat Card
+
 **Role:** Large display metric panel
 
 8px radius, background #2b2538 (Deep Plum), 1px border in #e3ccc0 (Warm Sand) at low opacity or no border, padding 32-40px. Giant number in Saans weight 300 at 100px in #fcfaf9, unit suffix ('hrs', '%') at 1/3 size. Short caption below in 14-16px #fcfaf9 or #a2f6f5.
 
 ### Testimonial Card
+
 **Role:** Customer quote panel
 
 8px radius, background #2b2538, padding 32-40px, company logo top-left in #fcfaf9, quote in Saans 300 at 18-20px in #fcfaf9, author avatar (circular) + name in weight 500 + role in #a69f9d.
 
 ### Top Navigation Bar
+
 **Role:** Sticky site header
 
 Full-width, background #200f0a or transparent over cocoa, logo left, nav links centered or left in Saans 500 14-16px #fcfaf9, language switcher and login right. On scroll, may gain 1px bottom border in #e3ccc0 at low opacity.
 
 ### Logo Lockup
+
 **Role:** Brand mark + wordmark
 
 Dashlane D-icon (small geometric D in #fcfaf9) + 'DASHLANE' wordmark in Saans 500, uppercase, letter-spacing 0.02em, in #fcfaf9.
 
 ### Announcement Bar
+
 **Role:** Top promo strip
 
 Full-bleed, background #200f0a with possible thin border, text in #fcfaf9 14px Saans 500, close X right. Centered, max-height ~40px.
 
 ### Input Field
+
 **Role:** Form inputs (login, contact)
 
 4px radius, background #2b2538 or #200f0a, 1px border in #e3ccc0, text in #fcfaf9 Saans 500, placeholder in #a69f9d. Focus state: border shifts to #a2f6f5 (Mint).
 
 ### Trust Logo Strip
+
 **Role:** Enterprise customer logos
 
 Horizontal row of greyscale logos in #fcfaf9 or #e5e7eb at 60-70% opacity, aligned on a shared baseline, centered under a 'TRUSTED BY TOP ENTERPRISES' overline in SaansMono 300 0.06em tracking.
 
 ### Hero Headline
+
 **Role:** Primary above-fold headline
 
 Saans weight 300, 72-100px, line-height 1.10, letter-spacing ~1px. Color rule: first word in #a2f6f5 (Mint Keyhole), remaining words in #fcfaf9 — the mint word acts as the 'lit doorway' in the vault.
 
 ### Chat Widget Panel
+
 **Role:** Floating bottom-right support widget
 
 8px radius, background #fcfaf9 (light surface floating on dark page), padding 16-20px, text in #200f0a, CTA buttons filled in #200f0a with #fcfaf9 text. Contrasts the dark page by being a light island.
 
 ### Progress/Bar Indicator
+
 **Role:** Thin underline bar inside stat cards
 
 4px height, horizontal bar under the giant stat, fill in #a2f6f5 (Mint) at ~40% width, track in #e3ccc0 (Warm Sand) at low opacity. Acts as a visual rhythm anchor beneath the number.
@@ -141,6 +157,7 @@ Saans weight 300, 72-100px, line-height 1.10, letter-spacing ~1px. Color rule: f
 ## Do's and Don'ts
 
 ### Do
+
 - Use Saans weight 300 for all headlines and statistics — never bump to 600/700 for emphasis; size and color do the heavy lifting
 - Color the first word of hero headlines in #a2f6f5 (Mint) and leave the rest in #fcfaf9 — this is the system's signature punctuation
 - Use 9999px radius for all buttons, tags, and pill controls; reserve 8px for cards and 4px for inputs and small UI
@@ -150,6 +167,7 @@ Saans weight 300, 72-100px, line-height 1.10, letter-spacing ~1px. Color rule: f
 - Set display sizes between 72-100px for hero statistics; smaller statistics should land at 48-56px, never below 36px
 
 ### Don't
+
 - Don't use pure black (#000000) as a background — the warmth of #200f0a is the brand
 - Don't use weight 600 or 700 in Saans; the font is designed as a two-weight conversation between 300 and 500
 - Don't pair mint and violet on the same control — mint is the filled voice, violet is the outlined voice

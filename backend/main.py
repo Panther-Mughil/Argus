@@ -27,6 +27,7 @@ app.add_middleware(
 )
 
 from fastapi.responses import HTMLResponse
+from pathlib import Path
 import os
 import json
 import asyncio
@@ -60,17 +61,25 @@ class ConnectionManager:
 manager = ConnectionManager()
 active_agents: Dict[int, AgentLoop] = {}
 
+# Static frontend files served by the backend (same-origin)
+FRONTEND_DIR = Path(os.path.dirname(os.path.dirname(__file__))) / "frontend"
+
 @app.get("/")
 async def serve_frontend():
-    index_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend", "index.html")
-    with open(index_path, "r") as f:
-        return HTMLResponse(content=f.read())
+    try:
+        return HTMLResponse(content=(FRONTEND_DIR / "index.html").read_text(encoding="utf-8"))
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail="index.html not found") from e
 
 @app.get("/favicon.svg")
 async def serve_favicon():
-    favicon_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend", "favicon.svg")
-    with open(favicon_path, "r") as f:
-        return HTMLResponse(content=f.read(), media_type="image/svg+xml")
+    try:
+        return HTMLResponse(
+            content=(FRONTEND_DIR / "favicon.svg").read_text(encoding="utf-8"),
+            media_type="image/svg+xml",
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail="favicon.svg not found") from e
 
 @app.get("/health")
 async def health_check():
@@ -108,7 +117,7 @@ async def start_agent(challenge_id: int, db: AsyncSession = Depends(get_db)):
     
     # Start the real agent in the background
     # Note: AgentLoop is imported instead of MockAgent now
-    agent = AgentLoop(challenge_id, manager, challenge.title, challenge.description)
+    agent = AgentLoop(challenge_id, manager, challenge.title, challenge.description or "")
     active_agents[challenge_id] = agent
     asyncio.create_task(agent.run())
     
