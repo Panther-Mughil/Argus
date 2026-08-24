@@ -4,6 +4,7 @@ from datetime import datetime
 
 from .llm import generate_chat_completion
 from .scheduler import qwen_scheduler
+from backend.storage import list_files, challenge_dir
 from worker.sandbox import SandboxManager
 
 TOOLS = [
@@ -64,6 +65,45 @@ class AgentLoop:
         }
         await self.websocket_manager.broadcast_to_challenge(self.challenge_id, message)
 
+    async def _push_challenge_files(self) -> None:
+        """Upload the challenge's stored files into the container.
+
+        Called after ``ensure_connected()``.  Adds the remote paths to the
+        system prompt so the agent can ``cat``/``strings``/``binwalk`` them.
+
+        Fails soft: on any SSH/upload error, emits a SYSTEM event and
+        returns with an empty file list (the agent simply has no files).
+        """
+        files = list_files(self.challenge_id)
+        if not files:
+            return
+
+        remote_dir = f"/workspace/{self.challenge_id}"
+        remote_paths = []
+        try:
+            for name, _size in files:
+                local_path = str(challenge_dir(self.challenge_id) / name)
+                remote_path = await asyncio.to_thread(
+                    self.sandbox.upload_file, local_path, remote_dir
+                )
+                remote_paths.append(remote_path)
+        except Exception as exc:
+            await self._emit(
+                "SYSTEM",
+                f"Warning: could not push challenge files into sandbox: {exc}",
+                "text-danger",
+            )
+            print(f"Failed to upload challenge files: {exc}")
+            return
+
+        file_list = ", ".join(remote_paths)
+        self.messages[0]["content"] += (
+            f"\nChallenge files (already placed in the sandbox): {file_list}"
+        )
+        await self._emit(
+            "SYSTEM", f"Loaded {len(remote_paths)} challenge file(s) into sandbox.", "text-mint"
+        )
+
     async def run(self):
         self.running = True
         await self._emit("SYSTEM", "Agent initializing sandbox...", "text-mint")
@@ -72,6 +112,10 @@ class AgentLoop:
             # Connect to the shared kali-forensics container via SSH
             self.sandbox.ensure_connected()
             await self._emit("SYSTEM", "Connected to kali-forensics sandbox.", "text-mint")
+
+            # Push any uploaded challenge files into the container and
+            # expose their paths to the agent in the system prompt.
+            await self._push_challenge_files()
 
             while self.running:
                 await self._emit("SYSTEM", f"Waiting for model queue lock (concurrency)...", "text-stone")
@@ -136,6 +180,11 @@ class AgentLoop:
                             })
                             self.running = False
                             break
+                else:
+                    # No tool calls -> the model produced a final answer.
+                    # Stop the agent instead of looping indefinitely.
+                    await self._emit("SYSTEM", "Agent reached a conclusion.", "text-mint")
+                    break
 
         except Exception as e:
             await self._emit("SYSTEM", f"Agent Error: {str(e)}", "text-danger")

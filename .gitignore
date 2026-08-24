@@ -65,3 +65,6 @@ keys/
 keys/
 keys-ops/
 .pi/
+
+# Uploaded challenge artifacts (stored locally)
+backend/artifacts/

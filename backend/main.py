@@ -31,10 +31,17 @@ from pathlib import Path
 import os
 import json
 import asyncio
-from fastapi import WebSocket, WebSocketDisconnect
+from fastapi import WebSocket, WebSocketDisconnect, UploadFile, File
 from typing import Dict, List
 
 from .agent.loop import AgentLoop
+from backend.storage import (
+    list_files,
+    save_upload,
+    sanitize_filename,
+    delete_challenge_files,
+    OversizeError,
+)
 
 CHALLENGE_CATEGORIES = {"Web", "Pwn", "Reverse Engineering", "Cryptography", "Forensics", "OSINT", "Misc", "Steganography", "Programming", "Hardware", "Cloud", "Blockchain", "Mobile", "Network", "AI/ML"}
 
@@ -138,6 +145,55 @@ async def stop_agent(challenge_id: int, db: AsyncSession = Depends(get_db)):
     
     return {"status": "Agent stopped"}
 
+@app.post("/api/challenges/{challenge_id}/files", status_code=201)
+async def upload_challenge_file(
+    challenge_id: int,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Upload a file attached to a challenge.
+
+    Stored locally under ``backend/artifacts/{challenge_id}/``.  The upload
+    is streamed to disk in chunks; if it exceeds ``ARGUS_MAX_UPLOAD_SIZE_MB``
+    a ``413`` is returned and no partial file is left behind.
+    """
+    challenge = await db.get(Challenge, challenge_id)
+    if not challenge:
+        raise HTTPException(status_code=404, detail="Challenge not found")
+
+    filename = file.filename or ""
+    try:
+        safe_name = sanitize_filename(filename)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    try:
+        # Files are large (up to the configured cap); read in a worker
+        # thread so we don't block the event loop.
+        path = await asyncio.to_thread(save_upload, challenge_id, safe_name, file.file)
+    except OversizeError as exc:
+        raise HTTPException(status_code=413, detail=str(exc))
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to store file: {exc}")
+
+    return {"filename": path.name, "size": path.stat().st_size}
+
+@app.get("/api/challenges/{challenge_id}/files")
+async def list_challenge_files(challenge_id: int, db: AsyncSession = Depends(get_db)):
+    """List the uploaded files for a challenge."""
+    challenge = await db.get(Challenge, challenge_id)
+    if not challenge:
+        raise HTTPException(status_code=404, detail="Challenge not found")
+
+    files = list_files(challenge_id)
+    return {"files": [{"filename": name, "size": size} for name, size in files]}
+
+def _cleanup_remote_workspace(challenge_id: int) -> None:
+    """Best-effort removal of the container workspace dir for a challenge."""
+    from worker.sandbox import SandboxManager
+    SandboxManager().remove_remote_dir(f"/workspace/{challenge_id}")
+
+
 @app.delete("/api/challenges/{challenge_id}")
 async def delete_challenge(challenge_id: int, db: AsyncSession = Depends(get_db)):
     challenge = await db.get(Challenge, challenge_id)
@@ -151,6 +207,16 @@ async def delete_challenge(challenge_id: int, db: AsyncSession = Depends(get_db)
         
     await db.delete(challenge)
     await db.commit()
+
+    # Clean up uploaded files: remove the local artifacts dir and
+    # best-effort remove the container workspace dir.
+    delete_challenge_files(challenge_id)
+    try:
+        # SSH remove is blocking; run it off the event loop.
+        await asyncio.to_thread(_cleanup_remote_workspace, challenge_id)
+    except Exception as exc:
+        # Non-fatal: cleanup inside the container is best-effort.
+        print(f"Failed to clean up container workspace for challenge {challenge_id}: {exc}")
     
     return {"status": "Challenge deleted"}
 

@@ -133,6 +133,22 @@
                         </div>
                     </div>
 
+                    <!-- Challenge File Upload -->
+                    <div class="bg-aubergine rounded-lg border border-sand/20 p-3 mb-4">
+                        <div class="font-mono text-xs uppercase tracking-mono text-stone mb-2">CHALLENGE FILES</div>
+                        <div v-if="selectedChallengeFiles.length === 0" class="text-stone italic text-sm mb-2">No files uploaded.</div>
+                        <div v-else class="mb-2 space-y-1">
+                            <div v-for="f in selectedChallengeFiles" :key="f.filename" class="text-sm font-mono text-cream/80 flex justify-between">
+                                <span>{{ f.filename }}</span>
+                                <span class="text-stone">{{ formatBytes(f.size) }}</span>
+                            </div>
+                        </div>
+                        <div class="flex space-x-2">
+                            <input ref="fileInput" type="file" class="flex-1 bg-cocoa border border-sand/40 rounded p-2 text-cream text-sm file:mr-3 file:bg-plum file:text-mint file:border-0 file:rounded file:px-3 file:py-1">
+                            <button @click="uploadFile" class="bg-mint text-cocoa font-medium rounded-lg py-2 px-4 hover:bg-mint/90 transition">Upload</button>
+                        </div>
+                    </div>
+
                     <!-- Live Terminal/Event Stream -->
                     <div class="flex-1 bg-cocoa border border-sand/30 rounded-lg font-mono text-[13px] leading-relaxed overflow-y-auto p-4" id="terminal">
 <style>
@@ -185,6 +201,8 @@ const newChallenge = ref({ title: '', category: CHALLENGE_CATEGORIES[0], descrip
                 
                 const logs = ref([])
                 const interventionText = ref('')
+                const selectedChallengeFiles = ref([])
+                const fileInput = ref(null)
                 let ws = null
                 
                 const API_BASE = "http://localhost:8000/api"
@@ -235,6 +253,7 @@ const newChallenge = ref({ title: '', category: CHALLENGE_CATEGORIES[0], descrip
                 const selectChallenge = (challenge) => {
                     selectedChallenge.value = challenge
                     connectWebSocket(challenge.id)
+                    fetchFiles(challenge.id)
                 }
                 
                 const startAgent = async () => {
@@ -262,6 +281,7 @@ const newChallenge = ref({ title: '', category: CHALLENGE_CATEGORIES[0], descrip
                         await fetch(`${API_BASE}/challenges/${id}`, { method: 'DELETE' })
                         if (selectedChallenge.value && selectedChallenge.value.id === id) {
                             selectedChallenge.value = null;
+                            selectedChallengeFiles.value = [];
                             logs.value = [];
                             if (ws) {
                                 ws.close();
@@ -274,6 +294,45 @@ const newChallenge = ref({ title: '', category: CHALLENGE_CATEGORIES[0], descrip
                     }
                 }
                 
+                const fetchFiles = async (challengeId) => {
+                    try {
+                        const res = await fetch(`${API_BASE}/challenges/${challengeId}/files`)
+                        if (!res.ok) return
+                        const data = await res.json()
+                        selectedChallengeFiles.value = data.files || []
+                    } catch (e) {
+                        console.error("Failed to fetch files", e)
+                    }
+                }
+
+                const uploadFile = async () => {
+                    if (!selectedChallenge.value) return
+                    const input = fileInput.value
+                    if (!input || !input.files || input.files.length === 0) return
+                    const file = input.files[0]
+                    const fd = new FormData()
+                    fd.append('file', file)
+                    try {
+                        const res = await fetch(`${API_BASE}/challenges/${selectedChallenge.value.id}/files`, { method: 'POST', body: fd })
+                        if (!res.ok) {
+                            console.error('Upload failed', res.status)
+                            return
+                        }
+                        await fetchFiles(selectedChallenge.value.id)
+                        input.value = ''
+                    } catch (e) {
+                        console.error('Failed to upload file', e)
+                    }
+                }
+
+                const formatBytes = (bytes) => {
+                    if (bytes === 0) return '0 B'
+                    const k = 1024
+                    const sizes = ['B', 'KB', 'MB', 'GB']
+                    const i = Math.floor(Math.log(bytes) / Math.log(k))
+                    return (bytes / Math.pow(k, i)).toFixed(1) + ' ' + sizes[i]
+                }
+
                 const sendIntervention = () => {
                     if (!ws || !interventionText.value.trim()) return
                     ws.send(interventionText.value)
@@ -306,7 +365,12 @@ const newChallenge = ref({ title: '', category: CHALLENGE_CATEGORIES[0], descrip
                     startAgent,
                     stopAgent,
                     deleteChallenge,
-                    sendIntervention
+                    sendIntervention,
+                    selectedChallengeFiles,
+                    fileInput,
+                    uploadFile,
+                    fetchFiles,
+                    formatBytes
                 }
             }
         }).mount('#app')

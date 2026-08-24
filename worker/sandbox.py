@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Optional
 
 import logging
@@ -101,6 +102,53 @@ class SandboxManager:
             "exit_code": exit_code,
             "output": output,
         }
+
+    # ------------------------------------------------------------------
+    # File transfer (SFTP)
+    # ------------------------------------------------------------------
+
+    def upload_file(self, local_path: str, remote_dir: str) -> str:
+        """Upload a local file into the container via SFTP.
+
+        Creates *remote_dir* if it does not already exist, then uploads the
+        file, preserving its basename.
+
+        Returns the full remote path of the uploaded file.
+        """
+        self.connect()
+        if self._client is None:
+            raise RuntimeError("SSH client is not connected")
+
+        local_path = str(local_path)
+        remote_dir = remote_dir.rstrip("/")
+        remote_path = f"{remote_dir}/{Path(local_path).name}"
+
+        # Ensure the destination directory exists (use exec_command, as
+        # paramiko's SFTP client has no trivial recursive makedirs).
+        stdin, stdout, stderr = self._client.exec_command(f"mkdir -p {remote_dir}")
+        stdout.channel.recv_exit_status()
+
+        sftp = self._client.open_sftp()
+        try:
+            sftp.put(local_path, remote_path)
+        finally:
+            sftp.close()
+        return remote_path
+
+    def remove_remote_dir(self, remote_dir: str) -> None:
+        """Best-effort recursive removal of a remote directory.
+
+        Failures are logged, never raised (cleanup should not crash the
+        caller).
+        """
+        try:
+            self.connect()
+            if self._client is None:
+                return
+            stdin, stdout, stderr = self._client.exec_command(f"rm -rf {remote_dir}")
+            stdout.channel.recv_exit_status()
+        except Exception as exc:
+            logger.warning("Failed to remove remote dir %s: %s", remote_dir, exc)
 
     # ------------------------------------------------------------------
     # Lifecycle
