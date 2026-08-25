@@ -144,6 +144,9 @@ LOOP DISCIPLINE:
 - Every command counts. Never repeat an identical command — even if it returned exit code 0 with empty output.
 - After 2-3 failures in the same family (mount/losetup/sudo/mknod), switch strategy immediately.
 - Search for the ANSWER SHAPE (the pattern the challenge asks for), not the literal word "flag".
+- Your shell runs inside your work/ directory; extraction writes files there.
+- Prefer non-destructive extraction (`gunzip -c > file`, `tar xzf`, `7z x`). Avoid `gzip -d`/`gunzip`/`rm` — they DELETE their input file.
+- NEVER modify originals/ (protected evidence). If a file is missing, list originals/ and copy the exact name into work/.
 - When stuck, state: your hypothesis, the precise blocker, and ONE concrete new idea.
 """
 
@@ -153,11 +156,11 @@ CATEGORY_PROMPTS = {
 
 Recommended workflow:
 1. Identify every artifact first: `file <path>`, `xxd <path> | head`.
-2. Decompress/extract: `gunzip`, `tar xf`, `unzip`, `7z x`.
+2. Decompress/extract NON-destructively (keep the archive): `tar xzf <file.gz>` / `tar xf <file>`, `7z x <img>`, `gunzip -c <file.gz> > <out>`, `unzip` (never `gzip -d`, which deletes the source).
 3. Disk/USB images (common case) — extract filesystem contents WITHOUT mounting:
    - `7z l <img>` / `7z x <img>`, or
    - sleuthkit: `mmls <img>` → `fls -o <offset> <img>` and `icat -o <offset> <img> <inode>`, or `tsk_recover -o <offset> <img> <dir>`, or
-   - `binwalk -e <img>` (carve embedded files), or
+   - `binwalk -e --run-as=root <img>` (carve embedded files), or
    - parse it with Python (write a small script).
 4. PCAPs: `tshark -r <file>`, `tcpflow`, follow streams, extract objects.
 5. Metadata is often the answer: `exiftool <file>`, `strings -a <file>`, `stat`.
@@ -199,10 +202,11 @@ def build_system_prompt(title: str, desc: str, category: str, goal: str | None =
         work_dir = f"{sandbox_root}/{challenge_id}/{settings.ARGUS_WORK_DIR}"
         parts.append(
             f"\nWORKSPACE CONTRACT:\n"
-            f"- Your writable scratch area is {work_dir}/ — this is where you extract, script, and analyze.\n"
+            f"- Your writable scratch area is {work_dir}/ — your shell starts here, so extraction writes files HERE.\n"
             f"- Evidence files are stored in {originals_dir}/ (read-only, protected).\n"
-            f"- Before editing any evidence file, copy it first: `cp {settings.ARGUS_ORIGINALS_DIR}/<name> {settings.ARGUS_WORK_DIR}/` then edit the work copy.\n"
-            f"- You CANNOT write directly into originals/. If a command says \"No such file or directory\", restore from originals.\n"
+            f"- Before editing any evidence file, copy it first: `cp {originals_dir}/<name> {work_dir}/` then edit the work copy.\n"
+            f"- You CANNOT modify {originals_dir}/ — never run gzip -d, gunzip, rm, or any destructive command against it. If a file was restored, list it with `ls {originals_dir}` to get the exact name.\n"
+            f"- Files you extract via tar/7z land in {work_dir}/ (your current directory).\n"
             f"- You may read files anywhere under {sandbox_root}/{challenge_id}/ (including originals/), but writes are restricted to work/.\n"
         )
 
@@ -528,11 +532,13 @@ class AgentLoop:
         # Restore-on-missing: if a file was not found, suggest copying from originals.
         if "No such file or directory" in combined:
             sandbox_root = settings.ARGUS_SANDBOX_ROOT
+            originals_dir = f"{sandbox_root}/{self.challenge_id}/{settings.ARGUS_ORIGINALS_DIR}"
+            work_dir = f"{sandbox_root}/{self.challenge_id}/{settings.ARGUS_WORK_DIR}"
             return (
-                f"A file you referenced was not found. This may have been accidentally deleted or you wrote to a protected path. "
-                f"Restore it: `cp {sandbox_root}/{self.challenge_id}/{settings.ARGUS_ORIGINALS_DIR}/<name> "
-                f"{sandbox_root}/{self.challenge_id}/{settings.ARGUS_WORK_DIR}/`. "
-                f"Then try again with the correct path."
+                f"A file you referenced was not found (the platform will restore the protected original automatically). "
+                f"List originals with `ls {originals_dir}` to find the exact filename, then copy it into work: "
+                f"`cp {originals_dir}/<exact-name> {work_dir}/`. Then re-run your command with the correct path "
+                f"(note: extraction writes into your current work/ directory)."
             )
 
         # A known dead-end command family failed → nudge immediately.
@@ -584,17 +590,100 @@ class AgentLoop:
     async def _run_sandbox(self, cmd: str) -> dict:
         return await asyncio.to_thread(self.sandbox.execute_command, "kali-forensics", cmd)
 
+    async def _sync_originals(self) -> None:
+        """Verify the protected originals/ dir matches the host artifacts and heal it.
+
+        A destructive tool command (``gzip -d``, ``rm``, a ``7z x`` output path) run via
+        execute_command can corrupt or delete files under originals/. This checks each
+        expected file's size and, if any is missing or was changed, re-uploads it from the
+        host (the source of truth). Unexpected files are removed, and the healthy copies
+        are merged back into work/ without wiping the model's other progress.
+        """
+        files = list_files(self.challenge_id)  # host = source of truth
+        if not files:
+            return
+        sandbox_root = settings.ARGUS_SANDBOX_ROOT
+        originals_dir = f"{sandbox_root}/{self.challenge_id}/{settings.ARGUS_ORIGINALS_DIR}"
+        work_dir = f"{sandbox_root}/{self.challenge_id}/{settings.ARGUS_WORK_DIR}"
+        expected = {name: size for name, size in files}
+
+        # One remote command reports "MISSING <name>" or "<path> <size>" per expected file.
+        parts = [
+            f"stat -c '%n %s' {shlex.quote(originals_dir + '/' + name)} 2>/dev/null || echo MISSING {shlex.quote(name)}"
+            for name in expected
+        ]
+        try:
+            result = await self._run_sandbox("; ".join(parts))
+        except Exception as exc:
+            print(f"Originals sync check failed: {exc}")
+            return
+
+        seen: dict[str, int | None] = {}
+        for line in (result.get("output") or "").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            if line.startswith("MISSING "):
+                seen[line[len("MISSING "):]] = None
+            else:
+                try:
+                    path, sz = line.rsplit(" ", 1)
+                    seen[path.rsplit("/", 1)[-1]] = int(sz)
+                except (ValueError, IndexError):
+                    continue
+
+        restored: list[str] = []
+        for name, host_size in expected.items():
+            cur = seen.get(name)
+            if cur is None or cur != host_size:
+                try:
+                    await asyncio.to_thread(
+                        self.sandbox.upload_file, str(challenge_dir(self.challenge_id) / name), originals_dir
+                    )
+                    restored.append(name)
+                    await self._emit("SYSTEM", f"Restored protected evidence '{name}'.", "text-mint")
+                except Exception as exc:
+                    print(f"Failed to restore original '{name}': {exc}")
+
+        if not restored:
+            return
+
+        # Remove unexpected files that appeared in originals/ (e.g. a stray decompressed copy).
+        cleanup = f"cd {shlex.quote(originals_dir)} && find . -maxdepth 1 -type f "
+        cleanup += "".join(f"! -name {shlex.quote(n)} " for n in expected)
+        cleanup += "-delete 2>/dev/null || true"
+        try:
+            await self._run_sandbox(cleanup)
+        except Exception as exc:
+            print(f"Originals cleanup failed: {exc}")
+
+        # Merge the restored files back into the model's work dir (don't wipe its progress).
+        cp = " && ".join(
+            f"cp {shlex.quote(originals_dir + '/' + n)} {shlex.quote(work_dir + '/' + n)} 2>/dev/null"
+            for n in restored
+        )
+        if cp:
+            try:
+                await self._run_sandbox(cp)
+            except Exception as exc:
+                print(f"Merge restored files into work/ failed: {exc}")
+
     async def _handle_tool_call(self, tool_call_id: str, fn_name: str, fn_args: dict) -> str | None:
         sandbox_root = settings.ARGUS_SANDBOX_ROOT
 
         if fn_name == "execute_command":
             cmd = fn_args.get("command", "")
+            work_dir = f"{sandbox_root}/{self.challenge_id}/{settings.ARGUS_WORK_DIR}"
             await self._emit("ACTION", f"$ {cmd}", "text-sand", tool_name="execute_command")
-            result = await self._run_sandbox(cmd)
+            # Run inside the challenge work dir so extracted files land where the model expects.
+            result = await self._run_sandbox(f"cd {shlex.quote(work_dir)} && ( {cmd} )")
             content = self._format_command_result(result)
             await self._emit("OBSERVATION", content if content.strip() else "[No output]", "text-stone", tool_name="execute_command")
             self.messages.append({"role": "tool", "tool_call_id": tool_call_id, "content": content})
-            return self._assess_and_nudge(cmd, result)
+            nudge = self._assess_and_nudge(cmd, result)
+            # A destructive command may have damaged the protected originals; heal from host if so.
+            await self._sync_originals()
+            return nudge
 
         elif fn_name == "read_file":
             path = fn_args.get("path", "")
@@ -638,6 +727,16 @@ class AgentLoop:
                 })
                 return msg
             raw = fn_args.get("content", "")
+            if not raw.strip():
+                msg = (
+                    "REJECTED: write_file with empty content would create a 0-byte file, which is almost never what you want. "
+                    "To extract a file, use execute_command: `tar xzf <archive>`, `7z x <archive>`, or `binwalk -e --run-as=root <img>`. "
+                    "If you truly need an empty file, use execute_command: `touch <path>`."
+                )
+                await self._emit("ACTION", f"write_file {resolved} [REJECTED]", "text-danger", tool_name="write_file")
+                await self._emit("OBSERVATION", msg, "text-danger", tool_name="write_file")
+                self.messages.append({"role": "tool", "tool_call_id": tool_call_id, "content": msg})
+                return msg
             b64 = base64.b64encode(raw.encode("utf-8")).decode("ascii")
             cmd = (
                 f"mkdir -p \"$(dirname {shlex.quote(resolved)})\" && "

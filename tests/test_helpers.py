@@ -4,6 +4,7 @@ Run with:  python -m unittest discover -s tests
 """
 
 import unittest
+import asyncio
 
 from backend.agent.loop import (
     CORE_PROMPT,
@@ -17,11 +18,28 @@ from backend.agent.loop import (
     _protected_write_message,
 )
 from backend.agent.llm import _sanitize_messages
+from worker.sandbox import SandboxManager
 
 
 class _FakeWSManager:
     async def broadcast_to_challenge(self, challenge_id, message):
         pass
+
+
+class _FakeSandbox(SandboxManager):
+    """Sync fake that records execute_command calls (no real SSH)."""
+
+    def __init__(self):
+        super().__init__()
+        self.commands = []
+
+    def execute_command(self, container_id, cmd):
+        self.commands.append(cmd)
+        return {"exit_code": 0, "output": "", "stderr": ""}
+
+
+async def _noop(*args, **kwargs):
+    return None
 
 
 class TestHelpers(unittest.TestCase):
@@ -278,6 +296,50 @@ class TestLayeredPrompt(unittest.TestCase):
         self.assertIn('/workspace/16/originals', prompt)
         # And the workspace contract block must be present
         self.assertIn("WORKSPACE CONTRACT", prompt)
+
+
+class TestExecuteCommandCwd(unittest.TestCase):
+    """REQ-004: execute_command runs inside the challenge work dir."""
+
+    def test_commands_run_in_work_dir(self):
+        fs = _FakeSandbox()
+        loop = AgentLoop(42, _FakeWSManager(), "t", "d", "Forensics")
+        loop.sandbox = fs
+        loop._persist_event = _noop
+        loop._sync_originals = _noop  # avoid host/SSH calls
+        asyncio.run(loop._handle_tool_call("tc1", "execute_command", {"command": "tar -xvf ch39.gz"}))
+        self.assertTrue(fs.commands)
+        self.assertIn("cd /workspace/42/work &&", fs.commands[-1])
+        self.assertTrue(fs.commands[-1].endswith("( tar -xvf ch39.gz )"))
+
+
+class TestWriteFileEmptyContent(unittest.TestCase):
+    """REQ-004: write_file with empty content is rejected and never hits the sandbox."""
+
+    def test_empty_content_rejected(self):
+        fs = _FakeSandbox()
+        loop = AgentLoop(42, _FakeWSManager(), "t", "d", "Forensics")
+        loop.sandbox = fs
+        loop._persist_event = _noop
+        loop._sync_originals = _noop
+        msg = asyncio.run(
+            loop._handle_tool_call("tc2", "write_file", {"path": "/workspace/42/work/foo.txt", "content": "   "})
+        )
+        self.assertIsNotNone(msg)
+        assert msg is not None
+        self.assertIn("0-byte", msg)
+        self.assertEqual(fs.commands, [])  # no sandbox call for a rejected write
+
+
+class TestPromptDestructiveGuidance(unittest.TestCase):
+    """REQ-004: the prompt warns about destructive decompression and real cwd paths."""
+
+    def test_prompt_warns_about_destructive_decompress(self):
+        prompt = build_system_prompt("t", "d", "Forensics", challenge_id=16)
+        self.assertIn("gzip -d", prompt)          # warns against deleting the source
+        self.assertIn("--run-as=root", prompt)     # binwalk extraction hint
+        self.assertIn("/workspace/16/work", prompt)
+        self.assertIn("/workspace/16/originals", prompt)
 
 
 if __name__ == "__main__":
