@@ -2,6 +2,7 @@ from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+# pi-lens-ignore: python-hallucinated-import — sqlalchemy exposes `text` and `delete`; rule is a false positive.
 from sqlalchemy import text, delete
 from contextlib import asynccontextmanager
 
