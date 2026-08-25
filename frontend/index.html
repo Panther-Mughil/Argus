@@ -263,6 +263,13 @@
                                 >
                                     Stop
                                 </button>
+                                <button
+                                    @click="restartAgent"
+                                    v-if="['FAILED', 'BLOCKED', 'SOLVED'].includes(selectedChallenge.status)"
+                                    class="bg-mint text-cocoa font-medium rounded-lg py-2.5 px-6 hover:bg-mint/90 transition"
+                                >
+                                    Restart Agent
+                                </button>
                             </div>
 
                             <!-- Flag verification (human-in-the-loop) -->
@@ -539,6 +546,23 @@
                         }
                     };
 
+                    const restartAgent = async () => {
+                        if (!selectedChallenge.value) return;
+                        try {
+                            const r = await fetch(
+                                `${API_BASE}/challenges/${selectedChallenge.value.id}/restart`,
+                                { method: "POST" },
+                            );
+                            if (!r.ok) {
+                                console.error("Restart agent failed", r.status);
+                                return;
+                            }
+                            await fetchChallenges(); // Refresh status
+                        } catch (e) {
+                            console.error("Failed to restart agent", e);
+                        }
+                    };
+
                     const deleteChallenge = async (id) => {
                         if (
                             !confirm(
@@ -665,6 +689,7 @@
                         selectChallenge,
                         startAgent,
                         stopAgent,
+                        restartAgent,
                         deleteChallenge,
                         sendIntervention,
                         markSolved,

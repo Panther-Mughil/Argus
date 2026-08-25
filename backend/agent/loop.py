@@ -146,6 +146,7 @@ LOOP DISCIPLINE:
 - Search for the ANSWER SHAPE (the pattern the challenge asks for), not the literal word "flag".
 - Your shell runs inside your work/ directory; extraction writes files there.
 - Prefer non-destructive extraction (`gunzip -c > file`, `tar xzf`, `7z x`). Avoid `gzip -d`/`gunzip`/`rm` — they DELETE their input file.
+- NOTE: `gzip -c` COMPRESSES. To DECOMPRESS use `gunzip -c <file> > <out>` or `gzip -dc <file> > <out>`. To extract a tar that is wrapped in gzip in ONE step, use `tar -xzf <file>.gz`.
 - NEVER modify originals/ (protected evidence). If a file is missing, list originals/ and copy the exact name into work/.
 - When stuck, state: your hypothesis, the precise blocker, and ONE concrete new idea.
 """
@@ -156,7 +157,7 @@ CATEGORY_PROMPTS = {
 
 Recommended workflow:
 1. Identify every artifact first: `file <path>`, `xxd <path> | head`.
-2. Decompress/extract NON-destructively (keep the archive): `tar xzf <file.gz>` / `tar xf <file>`, `7z x <img>`, `gunzip -c <file.gz> > <out>`, `unzip` (never `gzip -d`, which deletes the source).
+2. Decompress/extract NON-destructively (keep the archive). A `.gz` may wrap a tar (use `tar -xzf <file>.gz` to extract both layers in ONE step) or a single file (`gunzip -c <file>.gz > <out>`, which keeps the .gz). CAUTION: `gzip -c` COMPRESSES — do not use it to decompress; `gzip -d`/`gunzip` DELETE the source. `7z x`, `unzip` for other formats.
 3. Disk/USB images (common case) — extract filesystem contents WITHOUT mounting:
    - `7z l <img>` / `7z x <img>`, or
    - sleuthkit: `mmls <img>` → `fls -o <offset> <img>` and `icat -o <offset> <img> <inode>`, or `tsk_recover -o <offset> <img> <dir>`, or
@@ -1011,7 +1012,7 @@ class AgentLoop:
             self._resume_event.set()
 
             import backend.main as main
-            if self.challenge_id in main.active_agents:
+            if main.active_agents.get(self.challenge_id) is self:
                 del main.active_agents[self.challenge_id]
 
     # ------------------------------------------------------------------

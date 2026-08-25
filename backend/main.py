@@ -2,7 +2,7 @@ from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import text
+from sqlalchemy import text, delete
 from contextlib import asynccontextmanager
 
 from .db.database import engine, Base, get_db
@@ -200,6 +200,51 @@ async def stop_agent(challenge_id: int, db: AsyncSession = Depends(get_db)):
     await db.commit()
     
     return {"status": "Agent stopped"}
+
+
+@app.post("/api/challenges/{challenge_id}/restart")
+async def restart_agent(challenge_id: int, db: AsyncSession = Depends(get_db)):
+    """Re-run a challenge's agent completely fresh, without deleting the challenge
+    or re-uploading its files.
+
+    Stops any running agent, clears the event log so the UI terminal starts blank,
+    resets status to IN_PROGRESS, and spawns a new AgentLoop (which re-stages
+    originals/ + work/ from the host on start, giving a clean environment).
+    """
+    challenge = await db.get(Challenge, challenge_id)
+    if not challenge:
+        raise HTTPException(status_code=404, detail="Challenge not found")
+
+    # Detach + stop any running agent. The guard in AgentLoop.finally ("is self")
+    # prevents a stale run from removing the fresh agent from active_agents.
+    old = active_agents.pop(challenge_id, None)
+    if old is not None:
+        old.stop()
+
+    # Clear the event log so the terminal starts blank for the fresh run.
+    try:
+        from .db.database import AsyncSessionLocal
+        from .db.models import EventLog
+        async with AsyncSessionLocal() as session:
+            await session.execute(delete(EventLog).where(EventLog.challenge_id == challenge_id))
+            await session.commit()
+    except Exception as exc:
+        print(f"Restart: failed to clear event log for {challenge_id}: {exc}")
+
+    challenge.status = ChallengeStatus.IN_PROGRESS
+    await db.commit()
+
+    agent = AgentLoop(
+        challenge_id,
+        manager,
+        challenge.title,
+        challenge.description or "",
+        challenge.category or "",
+    )
+    active_agents[challenge_id] = agent
+    asyncio.create_task(agent.run())
+
+    return {"status": "Agent restarted"}
 
 @app.post("/api/challenges/{challenge_id}/solved")
 async def mark_solved(challenge_id: int, db: AsyncSession = Depends(get_db)):
