@@ -26,12 +26,20 @@ class Settings(BaseSettings):
     ARGUS_LLM_MAX_TOKENS: int = 4096
 
     # Agent loop guardrails.
-    ARGUS_MAX_ITERATIONS: int = 40
+    ARGUS_MAX_ITERATIONS: int = 30
     ARGUS_MAX_RUN_SECONDS: int = 1800
     # Consecutive identical failing commands before the loop nudges the model to switch strategy.
     ARGUS_STALE_ATTEMPT_THRESHOLD: int = 3
+    # Consecutive tool calls without new info before the loop nudges the model to switch strategy.
+    ARGUS_STAGNATION_TURNS: int = 6
     # Cap on a single tool result fed back into the model context (chars).
     ARGUS_MAX_TOOL_OUTPUT_CHARS: int = 6000
+
+    # Sandbox root directory prefix (per-challenge workspace root).
+    ARGUS_SANDBOX_ROOT: str = "/workspace"
+    # Subdirectory names inside each challenge workspace.
+    ARGUS_ORIGINALS_DIR: str = "originals"
+    ARGUS_WORK_DIR: str = "work"
 
     # Database.
     ARGUS_DATABASE_URL: str = "postgresql+asyncpg://argus:argus_password@localhost:5432/argus_db"

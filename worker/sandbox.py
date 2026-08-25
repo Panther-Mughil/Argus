@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import Optional
 
 import logging
+import shlex
 
 import paramiko
 
@@ -152,6 +153,59 @@ class SandboxManager:
             stdout.channel.recv_exit_status()
         except Exception as exc:
             logger.warning("Failed to remove remote dir %s: %s", remote_dir, exc)
+
+    # ------------------------------------------------------------------
+    # Evidence protection helpers (REQ-003)
+    # ------------------------------------------------------------------
+
+    def ensure_dir(self, remote_dir: str) -> None:
+        """Ensure a remote directory exists on the container filesystem.
+
+        Parameters
+        ----------
+        remote_dir:
+            Absolute path inside the container.
+        """
+        self.connect()
+        if self._client is None:
+            raise RuntimeError("SSH client is not connected")
+        stdin, stdout, stderr = self._client.exec_command(f"mkdir -p {remote_dir}")
+        stdout.channel.recv_exit_status()
+
+    def copy_originals_to_work(self, challenge_id: int, sandbox_root: str = "/workspace") -> None:
+        """Stage a clean copy of the originals into the work directory.
+
+        Removes any stale contents in *work/* first, then copies files
+        from *originals/* using ``cp -n`` (skip if work copy already exists).
+        Handles the case where ``originals/`` is empty (no-op).
+
+        Parameters
+        ----------
+        challenge_id:
+            Integer challenge id.
+        sandbox_root:
+            The common root prefix (default ``/workspace``).
+        """
+        self.connect()
+        if self._client is None:
+            raise RuntimeError("SSH client is not connected")
+
+        challenge_root = f"{sandbox_root}/{challenge_id}"
+        originals_dir = f"{challenge_root}/originals"
+        work_dir = f"{challenge_root}/work"
+
+        # Ensure both directories exist.
+        self.ensure_dir(originals_dir)
+        self.ensure_dir(work_dir)
+
+        # Remove stale junk from work/, then copy originals in.
+        cmd = (
+            f"cd {shlex.quote(challenge_root)} && "
+            f"rm -rf work/* work/.* 2>/dev/null; "
+            f"cp -n originals/* work/ 2>/dev/null || true"
+        )
+        stdin, stdout, stderr = self._client.exec_command(cmd)
+        stdout.channel.recv_exit_status()
 
     # ------------------------------------------------------------------
     # Lifecycle

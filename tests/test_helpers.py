@@ -6,12 +6,15 @@ Run with:  python -m unittest discover -s tests
 import unittest
 
 from backend.agent.loop import (
+    CORE_PROMPT,
     build_system_prompt,
     extract_goal,
     _missing_bin,
     truncate,
     _to_int,
     AgentLoop,
+    _resolve_remote_path,
+    _protected_write_message,
 )
 from backend.agent.llm import _sanitize_messages
 
@@ -39,13 +42,13 @@ class TestHelpers(unittest.TestCase):
 
 class TestSystemPrompt(unittest.TestCase):
     def test_forensics_category_injects_playbook(self):
-        prompt = build_system_prompt("t", "d", "Forensics")
+        prompt = build_system_prompt("t", "d", "Forensics", challenge_id=16)
         self.assertIn("FORENSICS", prompt)
         self.assertIn("file", prompt)
         self.assertIn("binwalk", prompt)
 
     def test_unknown_category_has_core_only(self):
-        prompt = build_system_prompt("t", "d", "Weird")
+        prompt = build_system_prompt("t", "d", "Weird", challenge_id=16)
         self.assertIn("Challenge: t", prompt)
         self.assertNotIn("binwalk", prompt)
 
@@ -90,7 +93,7 @@ class TestGoalExtraction(unittest.TestCase):
 class TestPromptWithGoal(unittest.TestCase):
     def test_prompt_includes_goal(self):
         goal = extract_goal("flag format is: firstname_lastname")
-        prompt = build_system_prompt("t", "flag format is: firstname_lastname", "Forensics", goal)
+        prompt = build_system_prompt("t", "flag format is: firstname_lastname", "Forensics", goal, challenge_id=16)
         self.assertIn("firstname_lastname", prompt)
         self.assertIn("PROMPT GOAL", prompt)
 
@@ -139,6 +142,142 @@ class TestAssessNudge(unittest.TestCase):
         loop = self._loop()
         nudge = loop._assess_and_nudge("ls", {"exit_code": 0, "output": "ok", "stderr": ""})
         self.assertIsNone(nudge)
+
+    def test_repeat_nudge_any_exit_code(self):
+        """Repeat detection fires regardless of exit code (REQ-003)."""
+        loop = self._loop()
+        loop._last_cmd = None
+        # Same command, exit code 0 every time — should still trigger the nudge.
+        loop._assess_and_nudge("cat /workspace/1/work/file.txt", {"exit_code": 0, "output": "", "stderr": ""})
+        loop._assess_and_nudge("cat /workspace/1/work/file.txt", {"exit_code": 0, "output": "", "stderr": ""})
+        nudge = loop._assess_and_nudge("cat /workspace/1/work/file.txt", {"exit_code": 0, "output": "", "stderr": ""})
+        self.assertIsNotNone(nudge)
+        assert nudge is not None
+        self.assertIn("STOP", nudge)
+
+    def test_restore_on_missing(self):
+        """A 'No such file or directory' error triggers restore guidance (REQ-003)."""
+        loop = self._loop()
+        loop._last_cmd = None
+        nudge = loop._assess_and_nudge(
+            "cat /workspace/1/work/missing.dat",
+            {"exit_code": 1, "output": "", "stderr": "cat: /workspace/1/work/missing.dat: No such file or directory"}
+        )
+        self.assertIsNotNone(nudge)
+        assert nudge is not None
+        self.assertIn("cp", nudge)
+        self.assertIn("originals", nudge)
+        self.assertIn("work", nudge)
+
+
+class TestPathContainment(unittest.TestCase):
+    """Tests for _resolve_remote_path path containment (REQ-003)."""
+
+    def test_read_allowed_within_challenge_root(self):
+        """Read access is allowed under /workspace/{id}/."""
+        resolved = _resolve_remote_path("/workspace/42/originals/evidence.img", 42, write=False)
+        self.assertEqual(resolved, "/workspace/42/originals/evidence.img")
+
+    def test_read_allowed_in_work_dir(self):
+        """Read access is allowed under /workspace/{id}/work/."""
+        resolved = _resolve_remote_path("/workspace/42/work/file.txt", 42, write=False)
+        self.assertEqual(resolved, "/workspace/42/work/file.txt")
+
+    def test_read_rejected_outside_challenge(self):
+        """Read access outside /workspace/{id}/ is rejected."""
+        resolved = _resolve_remote_path("/workspace/99/evidence.img", 42, write=False)
+        self.assertIsNone(resolved)
+
+    def test_read_rejected_at_root(self):
+        """Read access at /workspace (no id) is rejected."""
+        resolved = _resolve_remote_path("/workspace/evidence.img", 42, write=False)
+        self.assertIsNone(resolved)
+
+    def test_write_allowed_under_work_dir(self):
+        """Write access is allowed under /workspace/{id}/work/."""
+        resolved = _resolve_remote_path("/workspace/42/work/script.py", 42, write=True)
+        self.assertEqual(resolved, "/workspace/42/work/script.py")
+
+    def test_write_rejected_in_originals(self):
+        """Write access to originals/ is rejected."""
+        resolved = _resolve_remote_path("/workspace/42/originals/evidence.img", 42, write=True)
+        self.assertIsNone(resolved)
+
+    def test_write_rejected_outside_work(self):
+        """Write access outside work/ is rejected."""
+        resolved = _resolve_remote_path("/workspace/42/tools/analyze.py", 42, write=True)
+        self.assertIsNone(resolved)
+
+    def test_relative_path_anchored_to_work(self):
+        """Relative paths are anchored to work/."""
+        resolved = _resolve_remote_path("../originals/img.zip", 42, write=True)
+        # normpath resolves ../ to a parent; should be outside work/
+        self.assertIsNone(resolved)
+
+
+class TestProtectedWriteMessage(unittest.TestCase):
+    def test_message_contains_copy_hint(self):
+        msg = _protected_write_message("/workspace/42/originals/img", 42)
+        self.assertIn("cp", msg)
+        self.assertIn("originals", msg)
+        self.assertIn("work", msg)
+        self.assertIn("protected", msg.lower())
+
+
+class TestLayeredPrompt(unittest.TestCase):
+    """Tests for the layered system prompt structure (REQ-003)."""
+
+    def test_core_prompt_contains_workspace_contract(self):
+        prompt = build_system_prompt("t", "d", "Forensics", challenge_id=16)
+        self.assertIn("WORKSPACE CONTRACT", prompt)
+        self.assertIn("originals", prompt)
+        self.assertIn("work", prompt)
+
+    def test_core_prompt_contains_loop_discipline(self):
+        prompt = build_system_prompt("t", "d", "Forensics")
+        self.assertIn("LOOP DISCIPLINE", prompt)
+        self.assertIn("PLAN", prompt)
+
+    def test_core_prompt_contains_role_scope(self):
+        prompt = build_system_prompt("t", "d", "Forensics")
+        self.assertIn("CTF-solving agent", prompt)
+        self.assertIn("authorized", prompt)
+
+    def test_layered_prompt_includes_file_info(self):
+        file_info = "/workspace/42/work/evidence.img (1234 bytes) — type: gzip compressed"
+        prompt = build_system_prompt("t", "d", "Forensics", "name", file_info, challenge_id=16)
+        self.assertIn("Challenge files (staged in your workspace):", prompt)
+        self.assertIn("evidence.img", prompt)
+        self.assertIn("PROMPT GOAL", prompt)
+
+    def test_forensics_category_includes_extraction_guidance(self):
+        prompt = build_system_prompt("t", "d", "Forensics", challenge_id=16)
+        self.assertIn("7z x", prompt)
+        self.assertIn("binwalk -e", prompt)
+        self.assertIn("mmls", prompt)
+        self.assertIn("icat", prompt)
+
+    def test_category_playbook_present_for_known_category(self):
+        for cat in ["Forensics", "Cryptography", "Pwn", "Web", "Reverse Engineering", "OSINT", "Steganography", "Misc"]:
+            prompt = build_system_prompt("t", "d", cat)
+            # Should not raise and should contain something relevant
+            self.assertIsInstance(prompt, str)
+            self.assertGreater(len(prompt), 50)
+
+    def test_regression_no_literal_id_in_core_prompt(self):
+        """CORE_PROMPT must not contain any literal '{id}' template placeholders."""
+        self.assertEqual(CORE_PROMPT.count('{id}'), 0)
+
+    def test_regression_dynamic_workspace_contract_paths(self):
+        """When challenge_id is provided, build_system_prompt must produce real paths and no '{id}'."""
+        prompt = build_system_prompt("t", "d", "Forensics", challenge_id=16)
+        # The generated prompt must not contain literal '{id}'
+        self.assertNotIn('{id}', prompt)
+        # It must contain the real workspace paths for challenge 16
+        self.assertIn('/workspace/16/work', prompt)
+        self.assertIn('/workspace/16/originals', prompt)
+        # And the workspace contract block must be present
+        self.assertIn("WORKSPACE CONTRACT", prompt)
 
 
 if __name__ == "__main__":

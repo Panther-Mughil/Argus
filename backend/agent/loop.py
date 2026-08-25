@@ -5,15 +5,20 @@ Design goals (see the investigation plan):
 - Bound the loop (max iterations / time) and recover from bad responses.
 - Only announce the model-queue lock when it is actually contended.
 - Pause on ``submit_flag`` for human verification, and resume on rejection.
+- Evidence protection: originals/ is read-only; writes contained to work/.
+- Anti-loop: repeat detection regardless of exit code, stagnation guard, restore-on-missing.
 """
 
 import asyncio
 import base64
 import json
+import os
 import re
 import shlex
 import time
 from datetime import datetime
+from pathlib import Path as StdPath
+from typing import Optional
 
 from .llm import generate_chat_completion, default_model
 from .scheduler import model_scheduler
@@ -49,7 +54,9 @@ TOOLS = [
             "name": "read_file",
             "description": (
                 "Read a bounded slice of a file in the sandbox by byte offset. "
-                "Use this to page through a large file instead of dumping it all."
+                "Use this to page through a large file instead of dumping it all. "
+                "You may read files under /workspace/{id}/ (challenge dir), but "
+                "writes are restricted to /workspace/{id}/work/."
             ),
             "parameters": {
                 "type": "object",
@@ -68,12 +75,14 @@ TOOLS = [
             "name": "write_file",
             "description": (
                 "Write content to a file in the sandbox (e.g. a small analysis/decoding "
-                "script). Parent directories are created automatically."
+                "script). Parent directories are created automatically. "
+                "You can ONLY write under /workspace/{id}/work/. For evidence files, "
+                "copy from originals/ first: `cp originals/<name> work/`."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Absolute path in the sandbox."},
+                    "path": {"type": "string", "description": "Absolute path in the sandbox (must be under work/)."},
                     "content": {"type": "string", "description": "Text to write."},
                 },
                 "required": ["path", "content"],
@@ -86,13 +95,13 @@ TOOLS = [
             "name": "search_files",
             "description": (
                 "Recursively search files under a directory for a regular expression "
-                "(uses ripgrep). Defaults to a flag-like pattern. Use this to hunt for "
+                "(uses ripgrep). Defaults to the work directory. Use this to hunt for "
                 "flags across extracted artifacts."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Directory to search."},
+                    "path": {"type": "string", "description": "Directory to search (default: work/ dir)."},
                     "pattern": {"type": "string", "description": "Regex; defaults to a flag-like pattern."},
                 },
                 "required": ["path"],
@@ -119,6 +128,10 @@ TOOLS = [
 ]
 
 
+# ============================================================
+# Layered system prompt (REQ-003)
+# ============================================================
+
 CORE_PROMPT = """You are an autonomous CTF-solving agent operating inside an isolated Kali Linux sandbox. This is an authorized educational CTF environment only.
 
 Work in a disciplined loop: PLAN -> ACT -> OBSERVE. After each tool result, decide the next concrete step. Never repeat an identical failed command; if a command fails, read the exit code and stderr and adjust. If you are stuck after a few attempts, change approach or clearly state the blocker instead of spinning.
@@ -126,7 +139,14 @@ Work in a disciplined loop: PLAN -> ACT -> OBSERVE. After each tool result, deci
 Tool results include an exit code, stdout, and stderr. A non-zero exit code means failure — use stderr to diagnose. Large output is truncated; use read_file/search_files/grep to narrow it down.
 
 When you find a flag, call submit_flag with the exact string. Do not keep exploring after proposing a flag.
+
+LOOP DISCIPLINE:
+- Every command counts. Never repeat an identical command — even if it returned exit code 0 with empty output.
+- After 2-3 failures in the same family (mount/losetup/sudo/mknod), switch strategy immediately.
+- Search for the ANSWER SHAPE (the pattern the challenge asks for), not the literal word "flag".
+- When stuck, state: your hypothesis, the precise blocker, and ONE concrete new idea.
 """
+
 
 CATEGORY_PROMPTS = {
     "Forensics": """\nThis is a FORENSICS challenge. IMPORTANT: this sandbox is an unprivileged container — loop mounts (`mount -o loop`, `losetup`) are NOT permitted and will always fail. Do NOT waste time on mount; extract and parse the image instead.
@@ -153,13 +173,49 @@ Recommended workflow:
 }
 
 
-def build_system_prompt(title: str, desc: str, category: str, goal: str | None = None) -> str:
+def build_system_prompt(title: str, desc: str, category: str, goal: str | None = None, file_info: str | None = None, challenge_id: int | None = None) -> str:
+    """Build a layered system prompt with role/scope, environment, challenge, workspace contract, loop discipline, category playbook, and submit rule.
+
+    Parameters
+    ----------
+    title, desc, category:
+        Challenge metadata.
+    goal:
+        Extracted expected answer shape (e.g. "firstname_lastname"), if any.
+    file_info:
+        Per-file metadata injected by `_push_challenge_files`, including work-dir paths.
+    challenge_id:
+        The integer challenge id. When provided, a dynamic WORKSPACE CONTRACT block
+        is appended with real /workspace/<id>/ paths (replacing the static template).
+    """
     parts = [
         CORE_PROMPT,
-        f"Challenge: {title or 'Untitled'}",
-        f"Category: {category or 'Unknown'}",
-        f"Description: {desc or '(none provided)'}",
     ]
+
+    # Dynamic workspace contract with real paths (replaces the static {id} template).
+    if challenge_id is not None:
+        sandbox_root = settings.ARGUS_SANDBOX_ROOT
+        originals_dir = f"{sandbox_root}/{challenge_id}/{settings.ARGUS_ORIGINALS_DIR}"
+        work_dir = f"{sandbox_root}/{challenge_id}/{settings.ARGUS_WORK_DIR}"
+        parts.append(
+            f"\nWORKSPACE CONTRACT:\n"
+            f"- Your writable scratch area is {work_dir}/ — this is where you extract, script, and analyze.\n"
+            f"- Evidence files are stored in {originals_dir}/ (read-only, protected).\n"
+            f"- Before editing any evidence file, copy it first: `cp {settings.ARGUS_ORIGINALS_DIR}/<name> {settings.ARGUS_WORK_DIR}/` then edit the work copy.\n"
+            f"- You CANNOT write directly into originals/. If a command says \"No such file or directory\", restore from originals.\n"
+            f"- You may read files anywhere under {sandbox_root}/{challenge_id}/ (including originals/), but writes are restricted to work/.\n"
+        )
+
+    # Challenge context
+    parts.append(f"Challenge: {title or 'Untitled'}")
+    parts.append(f"Category: {category or 'Unknown'}")
+    parts.append(f"Description: {desc or '(none provided)'}")
+
+    # File metadata (staged in work/ with originals/ protected)
+    if file_info:
+        parts.append(f"\nChallenge files (staged in your workspace):\n{file_info}")
+
+    # Goal / answer-shape block
     if goal:
         parts.append(
             "PROMPT GOAL / expected answer shape: " + goal + "\n"
@@ -167,9 +223,12 @@ def build_system_prompt(title: str, desc: str, category: str, goal: str | None =
             "(for example a person's name), NOT for the literal word 'flag' or 'ctf'. "
             "Inspect metadata (exiftool), embedded documents/images, filenames, and account/user records."
         )
+
+    # Category playbook
     category_prompt = CATEGORY_PROMPTS.get(category)
     if category_prompt:
         parts.append(category_prompt)
+
     return "\n".join(parts)
 
 
@@ -185,7 +244,7 @@ def extract_goal(desc: str | None) -> str | None:
     return m.group(1) if m else None
 
 
-# Commands that cannot work in this unprivileged container — used to nudge the model off a dead end.
+# Commands that cannot work in this unprivileged container — used to nudge the model off a dead-end path.
 DEAD_END_GUIDANCE = {
     "mount": "Loop mounts are NOT permitted in this unprivileged container. Do not use mount. Extract disk-image contents with `7z x`, `binwalk -e`, or sleuthkit (`mmls` + `fls`/`icat`/`tsk_recover`).",
     "losetup": "Loop devices are not available here (losetup fails). Do not use mount/losetup. Extract the image with `7z x`, `binwalk -e`, or sleuthkit.",
@@ -223,6 +282,57 @@ def _to_int(value, default: int) -> int:
         return default
 
 
+# ============================================================
+# Path containment helpers (REQ-003)
+# ============================================================
+
+def _resolve_remote_path(raw: str, challenge_id: int, write: bool = False) -> str | None:
+    """Resolve and validate a remote path against workspace containment rules.
+
+    Parameters
+    ----------
+    raw:
+        The path as given by the agent (may be relative or absolute).
+    challenge_id:
+        The integer challenge id, used to build the workspace root prefix.
+    write:
+        If True, the path must be under the work/ subdirectory.
+        If False (read), the path must be under the challenge root.
+
+    Returns
+    -------
+    The resolved absolute path if valid, or None to indicate rejection.
+    """
+    sandbox_root = settings.ARGUS_SANDBOX_ROOT
+    challenge_root = f"{sandbox_root}/{challenge_id}"
+    work_dir = f"{challenge_root}/{settings.ARGUS_WORK_DIR}"
+
+    # Normalize the path.
+    resolved = os.path.normpath(raw)
+
+    if write:
+        # Write operations are only allowed under work/.
+        if resolved == work_dir or resolved.startswith(work_dir + "/"):
+            return resolved
+        return None  # Rejected — write outside work/.
+    else:
+        # Read operations are allowed anywhere under the challenge root.
+        if resolved == challenge_root or resolved.startswith(challenge_root + "/"):
+            return resolved
+        return None  # Rejected — read outside challenge workspace.
+
+
+def _protected_write_message(resolved_path: str, challenge_id: int) -> str:
+    """Return a rejection message for writes to protected/outside paths."""
+    sandbox_root = settings.ARGUS_SANDBOX_ROOT
+    challenge_root = f"{sandbox_root}/{challenge_id}"
+    return (
+        f"REJECTED: '{resolved_path}' is protected evidence or outside your work area. "
+        f"You may only write under {challenge_root}/{settings.ARGUS_WORK_DIR}/. "
+        f"If you need this file, copy it first: `cp {challenge_root}/{settings.ARGUS_ORIGINALS_DIR}/<name> {challenge_root}/{settings.ARGUS_WORK_DIR}/`, then edit the work copy."
+    )
+
+
 class AgentLoop:
     def __init__(self, challenge_id: int, websocket_manager, challenge_title: str, challenge_desc: str, category: str = ""):
         self.challenge_id = challenge_id
@@ -234,16 +344,22 @@ class AgentLoop:
         self._proposed_flag: str | None = None
         self.model = settings.ARGUS_MODEL or default_model()
         self._goal = extract_goal(challenge_desc)
-        self.messages = [
-            {"role": "system", "content": build_system_prompt(challenge_title, challenge_desc, category, self._goal)}
-        ]
         self.sandbox = SandboxManager()
-        self.iteration = 0
-        self.started_at: float | None = None
+
         # Anti-loop state: detect repeated failing commands / dead-end approaches.
         self._last_cmd: str | None = None
         self._repeat_failures = 0
         self._last_goal_nudge = 0
+        # Stagnation tracking: consecutive calls without new info.
+        self._stagnation_turns = 0
+        self._last_tool: str | None = None
+
+        # Build initial system prompt (file info added later by _push_challenge_files).
+        self.messages = [
+            {"role": "system", "content": build_system_prompt(challenge_title, challenge_desc, category, self._goal, challenge_id=self.challenge_id)}
+        ]
+        self.iteration = 0
+        self.started_at: float | None = None
 
     # ------------------------------------------------------------------
     # Event emission + persistence
@@ -313,21 +429,26 @@ class AgentLoop:
             return None
 
     async def _push_challenge_files(self) -> None:
-        """Upload the challenge's stored files into the container and expose
-        their paths *plus* type/archive metadata to the agent in the prompt."""
+        """Stage challenge files: upload to originals/, seed a clean work/, and inject metadata."""
         files = list_files(self.challenge_id)
         if not files:
             return
 
-        remote_dir = f"/workspace/{self.challenge_id}"
+        sandbox_root = settings.ARGUS_SANDBOX_ROOT
+        originals_dir = f"{sandbox_root}/{self.challenge_id}/{settings.ARGUS_ORIGINALS_DIR}"
+        work_dir = f"{sandbox_root}/{self.challenge_id}/{settings.ARGUS_WORK_DIR}"
+
         uploaded: list[tuple[str, int]] = []
         try:
             for name, size in files:
                 local_path = str(challenge_dir(self.challenge_id) / name)
                 remote_path = await asyncio.to_thread(
-                    self.sandbox.upload_file, local_path, remote_dir
+                    self.sandbox.upload_file, local_path, originals_dir
                 )
                 uploaded.append((remote_path, size))
+
+            # Seed a clean work/ directory from originals.
+            self.sandbox.copy_originals_to_work(self.challenge_id, sandbox_root)
         except Exception as exc:
             await self._emit(
                 "SYSTEM",
@@ -337,23 +458,31 @@ class AgentLoop:
             print(f"Failed to upload challenge files: {exc}")
             return
 
+        # Build metadata descriptions against the work copies.
         descriptions = []
-        for remote_path, size in uploaded:
-            desc = f"{remote_path} ({size} bytes)"
-            ftype = await self._file_type(remote_path)
+        for original_path, size in uploaded:
+            # Derive the work path: replace originals/ with work/
+            work_path = original_path.replace(
+                f"/{settings.ARGUS_ORIGINALS_DIR}/", f"/{settings.ARGUS_WORK_DIR}/"
+            )
+            desc = f"{work_path} ({size} bytes)"
+            ftype = await self._file_type(work_path)
             if ftype:
                 desc += f" — type: {ftype}"
-                listing = await self._archive_listing(remote_path, ftype)
+                listing = await self._archive_listing(work_path, ftype)
                 if listing:
                     desc += f" — archive contents:\n{listing}"
             descriptions.append(desc)
 
         file_list = "\n".join(descriptions)
+        # Update the system prompt with file metadata (includes work-dir paths).
         self.messages[0]["content"] += (
-            f"\nChallenge files (already placed in the sandbox):\n{file_list}"
+            f"\nChallenge files (staged in your workspace):\n{file_list}\n"
+            f"NOTE: A pristine copy of each file is in {originals_dir}/. "
+            f"Copy files from there to {work_dir}/ before editing."
         )
         await self._emit(
-            "SYSTEM", f"Loaded {len(uploaded)} challenge file(s) into sandbox.", "text-mint"
+            "SYSTEM", f"Loaded {len(uploaded)} challenge file(s) into sandbox (originals/ + work/).", "text-mint"
         )
 
     async def _inject_tool_inventory(self) -> None:
@@ -372,13 +501,22 @@ class AgentLoop:
         except Exception as exc:
             print(f"Tool inventory probe failed: {exc}")
 
+    # ------------------------------------------------------------------
+    # Assess & nudge (strengthened for REQ-003)
+    # ------------------------------------------------------------------
+
     def _assess_and_nudge(self, cmd: str, result: dict) -> str | None:
-        """Return targeted guidance when the model is on a clear dead-end path."""
+        """Return targeted guidance when the model is on a clear dead-end path.
+
+        Enhancements (REQ-003):
+        - Repeat detection works regardless of exit code.
+        - Restore-on-missing for "No such file or directory" errors.
+        """
         exit_code = result.get("exit_code")
         combined = (result.get("output") or "") + "\n" + (result.get("stderr") or "")
         failed = exit_code not in (None, 0)
 
-        # A tool the model tried is simply absent → redirect + surface as observability.
+        # A tool the model tried is simply absent → redirect.
         missing = _missing_bin(combined)
         if missing:
             return (
@@ -387,24 +525,35 @@ class AgentLoop:
                 "`7z x`, `binwalk -e`, or sleuthkit (`mmls`/`fls`/`icat`/`tsk_recover`) instead."
             )
 
-        # A known dead-end command family (mount/losetup/sudo/mknod) failed → nudge immediately.
+        # Restore-on-missing: if a file was not found, suggest copying from originals.
+        if "No such file or directory" in combined:
+            sandbox_root = settings.ARGUS_SANDBOX_ROOT
+            return (
+                f"A file you referenced was not found. This may have been accidentally deleted or you wrote to a protected path. "
+                f"Restore it: `cp {sandbox_root}/{self.challenge_id}/{settings.ARGUS_ORIGINALS_DIR}/<name> "
+                f"{sandbox_root}/{self.challenge_id}/{settings.ARGUS_WORK_DIR}/`. "
+                f"Then try again with the correct path."
+            )
+
+        # A known dead-end command family failed → nudge immediately.
         first = (cmd.split() or [""])[0]
         if first in DEAD_END_GUIDANCE and failed:
             return DEAD_END_GUIDANCE[first]
 
-        # Same command failed repeatedly → nudge to change strategy.
-        if cmd == self._last_cmd and failed:
+        # Same command repeated — ANY exit code → nudge to switch strategy.
+        if cmd == self._last_cmd:
             self._repeat_failures += 1
             if self._repeat_failures >= settings.ARGUS_STALE_ATTEMPT_THRESHOLD:
+                count = self._repeat_failures
                 self._repeat_failures = 0
                 return (
-                    f"You have run '{cmd}' repeatedly and it keeps failing. STOP repeating this command. "
-                    "Change strategy: inspect the artifact differently (extract with `7z x`/`tar xf`/`binwalk -e`, "
-                    "read metadata with `exiftool`/`strings`/`xxd`, or parse it with Python)."
+                    f"You have run '{cmd}' repeatedly ({count} times) and it keeps producing the same result. "
+                    f"STOP repeating this command. Change strategy: inspect the artifact differently (extract with `7z x`/`tar xf`/`binwalk -e`, "
+                    f"read metadata with `exiftool`/`strings`/`xxd`, or parse it with Python)."
                 )
         else:
             self._last_cmd = cmd
-            self._repeat_failures = 1 if failed else 0
+            self._repeat_failures = 1
         return None
 
     # ------------------------------------------------------------------
@@ -436,6 +585,8 @@ class AgentLoop:
         return await asyncio.to_thread(self.sandbox.execute_command, "kali-forensics", cmd)
 
     async def _handle_tool_call(self, tool_call_id: str, fn_name: str, fn_args: dict) -> str | None:
+        sandbox_root = settings.ARGUS_SANDBOX_ROOT
+
         if fn_name == "execute_command":
             cmd = fn_args.get("command", "")
             await self._emit("ACTION", f"$ {cmd}", "text-sand", tool_name="execute_command")
@@ -447,10 +598,26 @@ class AgentLoop:
 
         elif fn_name == "read_file":
             path = fn_args.get("path", "")
+            # Path containment check
+            resolved = _resolve_remote_path(path, self.challenge_id, write=False)
+            if resolved is None:
+                msg = (
+                    f"REJECTED: '{path}' is outside your challenge workspace. "
+                    f"You may only read files under /workspace/{self.challenge_id}/. "
+                    f"Focus on the files in your challenge."
+                )
+                await self._emit("ACTION", f"read_file {path} [REJECTED]", "text-danger", tool_name="read_file")
+                await self._emit("OBSERVATION", msg, "text-danger", tool_name="read_file")
+                self.messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call_id,
+                    "content": msg,
+                })
+                return msg
             offset = _to_int(fn_args.get("offset"), 0)
             limit = _to_int(fn_args.get("limit"), settings.ARGUS_MAX_TOOL_OUTPUT_CHARS)
-            cmd = f"dd if={shlex.quote(path)} bs=1 skip={offset} count={limit} 2>/dev/null"
-            await self._emit("ACTION", f"read_file {path} [{offset}:{offset + limit}]", "text-sand", tool_name="read_file")
+            cmd = f"dd if={shlex.quote(resolved)} bs=1 skip={offset} count={limit} 2>/dev/null"
+            await self._emit("ACTION", f"read_file {resolved} [{offset}:{offset + limit}]", "text-sand", tool_name="read_file")
             result = await self._run_sandbox(cmd)
             content = self._format_command_result(result)
             await self._emit("OBSERVATION", content if content.strip() else "[No output]", "text-stone", tool_name="read_file")
@@ -458,29 +625,60 @@ class AgentLoop:
 
         elif fn_name == "write_file":
             path = fn_args.get("path", "")
+            # Path containment check — writes only allowed under work/
+            resolved = _resolve_remote_path(path, self.challenge_id, write=True)
+            if resolved is None:
+                msg = _protected_write_message(path, self.challenge_id)
+                await self._emit("ACTION", f"write_file {path} [REJECTED]", "text-danger", tool_name="write_file")
+                await self._emit("OBSERVATION", msg, "text-danger", tool_name="write_file")
+                self.messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call_id,
+                    "content": msg,
+                })
+                return msg
             raw = fn_args.get("content", "")
             b64 = base64.b64encode(raw.encode("utf-8")).decode("ascii")
             cmd = (
-                f"mkdir -p \"$(dirname {shlex.quote(path)})\" && "
-                f"printf '%s' '{b64}' | base64 -d > {shlex.quote(path)}"
+                f"mkdir -p \"$(dirname {shlex.quote(resolved)})\" && "
+                f"printf '%s' '{b64}' | base64 -d > {shlex.quote(resolved)}"
             )
-            await self._emit("ACTION", f"write_file {path}", "text-sand", tool_name="write_file")
+            await self._emit("ACTION", f"write_file {resolved}", "text-sand", tool_name="write_file")
             result = await self._run_sandbox(cmd)
             content = self._format_command_result(result)
             await self._emit("OBSERVATION", content if content.strip() else "[written]", "text-stone", tool_name="write_file")
             self.messages.append({"role": "tool", "tool_call_id": tool_call_id, "content": content or "File written."})
 
         elif fn_name == "search_files":
-            path = fn_args.get("path", "/workspace")
+            path = fn_args.get("path", None)
+            # Default to work dir if not specified
+            if path is None or path.strip() == "":
+                path = f"{sandbox_root}/{self.challenge_id}/{settings.ARGUS_WORK_DIR}"
+            # Path containment check
+            resolved = _resolve_remote_path(path, self.challenge_id, write=False)
+            if resolved is None:
+                msg = (
+                    f"REJECTED: '{path}' is outside your challenge workspace. "
+                    f"You may only search under /workspace/{self.challenge_id}/. "
+                    f"Default search is your work directory."
+                )
+                await self._emit("ACTION", f"search_files [REJECTED]", "text-danger", tool_name="search_files")
+                await self._emit("OBSERVATION", msg, "text-danger", tool_name="search_files")
+                self.messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call_id,
+                    "content": msg,
+                })
+                return msg
             pattern = fn_args.get("pattern") or r"flag|ctf|FLAG|CTF|\{[A-Za-z0-9_\-]{4,}\}|[A-Za-z]+_[A-Za-z]+"
             pat = shlex.quote(pattern)
-            p = shlex.quote(path)
+            p = shlex.quote(resolved)
             cmd = (
                 f"{{ if command -v rg >/dev/null 2>&1; then "
                 f"rg -na --no-heading -e {pat} {p} 2>/dev/null; "
                 f"else grep -rnaE -e {pat} {p}; fi; }} | head -100"
             )
-            await self._emit("ACTION", f"search_files '{pattern}' in {path}", "text-sand", tool_name="search_files")
+            await self._emit("ACTION", f"search_files '{pattern}' in {resolved}", "text-sand", tool_name="search_files")
             result = await self._run_sandbox(cmd)
             content = self._format_command_result(result)
             await self._emit("OBSERVATION", content if content.strip() else "[No matches]", "text-stone", tool_name="search_files")
@@ -589,6 +787,20 @@ class AgentLoop:
                     await self._update_status("FAILED")
                     break
 
+                # Stagnation detection: track consecutive tool calls without new info.
+                if self._stagnation_turns >= settings.ARGUS_STAGNATION_TURNS and not self._proposed_flag:
+                    await self._emit(
+                        "SYSTEM",
+                        f"[STAGNATION WARNING] You have made {self._stagnation_turns} tool calls without making progress. "
+                        f"State your hypothesis, the precise blocker, and ONE concrete new idea. Switch your approach.",
+                        "text-lavender",
+                    )
+                    self.messages.append({
+                        "role": "user",
+                        "content": "[STAGNATION WARNING] You are stuck. State your hypothesis, the precise blocker, and ONE concrete new idea. Switch your approach.",
+                    })
+                    self._stagnation_turns = 0  # Reset after nudge
+
                 # Periodic goal reminder so the model doesn't lose the target / drift.
                 if self._goal and not self._proposed_flag and self.iteration > 0 and self.iteration - self._last_goal_nudge >= 8:
                     self._last_goal_nudge = self.iteration
@@ -646,6 +858,7 @@ class AgentLoop:
                         "content": "Your previous response was cut off. Continue exactly where you left off.",
                     })
                     self.iteration += 1
+                    self._stagnation_turns += 1
                     continue
 
                 if finish == "tool_calls" and message.get("tool_calls"):
@@ -667,6 +880,10 @@ class AgentLoop:
                         nudge = await self._handle_tool_call(tool_call["id"], fn_name, fn_args)
                         if nudge:
                             nudges.append(nudge)
+                            self._stagnation_turns = 0  # Reset on nudge (intervention)
+                        else:
+                            self._stagnation_turns += 1  # Increment on successful tool call
+
                     if nudges:
                         guidance = "\n".join(nudges)
                         await self._emit("SYSTEM", guidance, "text-lavender")
