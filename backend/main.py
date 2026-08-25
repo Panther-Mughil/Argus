@@ -2,25 +2,67 @@ from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy import text
 from contextlib import asynccontextmanager
 
 from .db.database import engine, Base, get_db
 from .db.models import Challenge, ChallengeStatus
 
-# Initialize database tables on startup
+# Adds FLAG_PROPOSED to the native Postgres enum if the DB was created before
+# that value existed. Idempotent on Postgres 12+ (compose uses postgres:15).
+_ENUM_MIGRATION_SQL = text(
+    """
+    DO $$
+    DECLARE
+      enum_name text;
+    BEGIN
+      SELECT pg_type.typname INTO enum_name
+      FROM pg_attribute
+      JOIN pg_type ON pg_type.oid = pg_attribute.atttypid
+      WHERE pg_attribute.attrelid = 'challenges'::regclass
+        AND pg_attribute.attname = 'status';
+      IF enum_name IS NOT NULL THEN
+        EXECUTE format('ALTER TYPE %I ADD VALUE IF NOT EXISTS ''FLAG_PROPOSED''', enum_name);
+      END IF;
+    END $$;
+    """
+)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         # Create tables (In production, use Alembic for migrations)
         await conn.run_sync(Base.metadata.create_all)
+    try:
+        async with engine.connect() as conn:
+            # pi-lens-ignore: python-sql-injection — enum_name is read from the
+            # Postgres system catalog (pg_type.typname), not user input, and is
+            # quoted with the %I identifier specifier. ALTER TYPE ... ADD VALUE
+            # cannot take a bound type name, so %I quoting is the safe form.
+            await conn.execute(_ENUM_MIGRATION_SQL)
+            # Static DDL (no user input): add the proposed_flag column if absent.
+            await conn.exec_driver_sql(
+                "ALTER TABLE challenges ADD COLUMN IF NOT EXISTS proposed_flag VARCHAR"
+            )
+            await conn.commit()
+    except Exception as exc:
+        # Non-fatal: only matters for DBs created before FLAG_PROPOSED existed.
+        print(f"Enum migration skipped: {exc}")
     yield
+
 
 app = FastAPI(title="Argus", lifespan=lifespan)
 
-# Allow CORS for local frontend development
+# Allow CORS for local frontend development (same-origin serving is the norm).
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -44,6 +86,15 @@ from backend.storage import (
 )
 
 CHALLENGE_CATEGORIES = {"Web", "Pwn", "Reverse Engineering", "Cryptography", "Forensics", "OSINT", "Misc", "Steganography", "Programming", "Hardware", "Cloud", "Blockchain", "Mobile", "Network", "AI/ML"}
+
+# Event type -> tailwind text color, used when replaying persisted events.
+_EVENT_COLORS = {
+    "PLAN": "text-lavender",
+    "ACTION": "text-sand",
+    "OBSERVATION": "text-cream",
+    "HYPOTHESIS": "text-iris",
+    "SYSTEM": "text-mint",
+}
 
 class ConnectionManager:
     def __init__(self):
@@ -123,8 +174,13 @@ async def start_agent(challenge_id: int, db: AsyncSession = Depends(get_db)):
     await db.commit()
     
     # Start the real agent in the background
-    # Note: AgentLoop is imported instead of MockAgent now
-    agent = AgentLoop(challenge_id, manager, challenge.title, challenge.description or "")
+    agent = AgentLoop(
+        challenge_id,
+        manager,
+        challenge.title,
+        challenge.description or "",
+        challenge.category or "",
+    )
     active_agents[challenge_id] = agent
     asyncio.create_task(agent.run())
     
@@ -140,10 +196,26 @@ async def stop_agent(challenge_id: int, db: AsyncSession = Depends(get_db)):
         active_agents[challenge_id].stop()
         del active_agents[challenge_id]
         
-    challenge.status = ChallengeStatus.FAILED # Or some other status for manually stopped
+    challenge.status = ChallengeStatus.FAILED
     await db.commit()
     
     return {"status": "Agent stopped"}
+
+@app.post("/api/challenges/{challenge_id}/solved")
+async def mark_solved(challenge_id: int, db: AsyncSession = Depends(get_db)):
+    """Mark a challenge solved after a human confirms the proposed flag."""
+    challenge = await db.get(Challenge, challenge_id)
+    if not challenge:
+        raise HTTPException(status_code=404, detail="Challenge not found")
+
+    challenge.status = ChallengeStatus.SOLVED
+    await db.commit()
+
+    if challenge_id in active_agents:
+        active_agents[challenge_id].stop()
+        del active_agents[challenge_id]
+
+    return {"status": "Marked solved"}
 
 @app.post("/api/challenges/{challenge_id}/files", status_code=201)
 async def upload_challenge_file(
@@ -220,9 +292,38 @@ async def delete_challenge(challenge_id: int, db: AsyncSession = Depends(get_db)
     
     return {"status": "Challenge deleted"}
 
+async def _replay_events(websocket: WebSocket, challenge_id: int):
+    """Send recent persisted events to a freshly-connected client."""
+    from .db.database import AsyncSessionLocal
+    from .db.models import EventLog
+
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(EventLog)
+                .where(EventLog.challenge_id == challenge_id)
+                .order_by(EventLog.created_at.asc())
+                .limit(200)
+            )
+            events = result.scalars().all()
+    except Exception as exc:
+        print(f"Event replay failed: {exc}")
+        return
+
+    for event in events:
+        etype = event.event_type.value if hasattr(event.event_type, "value") else str(event.event_type)
+        ts = event.created_at.strftime("%H:%M:%S") if event.created_at else ""
+        await websocket.send_text(json.dumps({
+            "type": etype,
+            "content": event.content,
+            "timestamp": ts,
+            "color": _EVENT_COLORS.get(etype, "text-cream"),
+        }))
+
 @app.websocket("/api/ws/challenges/{challenge_id}")
 async def websocket_endpoint(websocket: WebSocket, challenge_id: int):
     await manager.connect(websocket, challenge_id)
+    await _replay_events(websocket, challenge_id)
     try:
         while True:
             # Wait for any messages from the client (e.g. human intervention)
@@ -239,6 +340,13 @@ async def websocket_endpoint(websocket: WebSocket, challenge_id: int):
             
             # Inject into active agent context
             if challenge_id in active_agents:
-                await active_agents[challenge_id].inject_intervention(data)
+                agent = active_agents[challenge_id]
+                if agent.paused:
+                    # The agent proposed a flag and is awaiting verification;
+                    # this message is the human's verdict — resume the loop.
+                    agent.inject_intervention(data)
+                    await agent.reject_flag()
+                else:
+                    agent.inject_intervention(data)
     except WebSocketDisconnect:
         manager.disconnect(websocket, challenge_id)

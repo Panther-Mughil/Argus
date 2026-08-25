@@ -89,7 +89,8 @@ class SandboxManager:
 
         Returns
         -------
-        dict with keys ``exit_code`` (int) and ``output`` (str).
+        dict with keys ``exit_code`` (int), ``output`` (str, stdout), and
+        ``stderr`` (str).
         """
         self.connect()
         if self._client is None:
@@ -98,9 +99,11 @@ class SandboxManager:
         stdin, stdout, stderr = self._client.exec_command(cmd, timeout=timeout)
         exit_code = stdout.channel.recv_exit_status()
         output = stdout.read().decode("utf-8", errors="replace")
+        error_output = stderr.read().decode("utf-8", errors="replace")
         return {
             "exit_code": exit_code,
             "output": output,
+            "stderr": error_output,
         }
 
     # ------------------------------------------------------------------

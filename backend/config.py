@@ -20,6 +20,22 @@ class Settings(BaseSettings):
     # Per-file upload cap, in MB.
     ARGUS_MAX_UPLOAD_SIZE_MB: int = 500
 
+    # Model / LLM client.
+    ARGUS_MODEL: str = ""  # empty -> first model in models.json
+    ARGUS_LLM_TIMEOUT: int = 120
+    ARGUS_LLM_MAX_TOKENS: int = 4096
+
+    # Agent loop guardrails.
+    ARGUS_MAX_ITERATIONS: int = 40
+    ARGUS_MAX_RUN_SECONDS: int = 1800
+    # Consecutive identical failing commands before the loop nudges the model to switch strategy.
+    ARGUS_STALE_ATTEMPT_THRESHOLD: int = 3
+    # Cap on a single tool result fed back into the model context (chars).
+    ARGUS_MAX_TOOL_OUTPUT_CHARS: int = 6000
+
+    # Database.
+    ARGUS_DATABASE_URL: str = "postgresql+asyncpg://argus:argus_password@localhost:5432/argus_db"
+
     @property
     def resolved_ssh_key_path(self) -> str:
         """Resolve the SSH key path relative to the project root."""

@@ -18,6 +18,8 @@ class ChallengeStatus(str, enum.Enum):
     BLOCKED = "BLOCKED"
     SOLVED = "SOLVED"
     FAILED = "FAILED"
+    # Agent has proposed a flag and is paused, awaiting human verification.
+    FLAG_PROPOSED = "FLAG_PROPOSED"
 
 class EventType(str, enum.Enum):
     PLAN = "PLAN"
@@ -63,6 +65,7 @@ class Challenge(Base):
     status: Mapped[Optional[ChallengeStatus]] = mapped_column(Enum(ChallengeStatus), default=ChallengeStatus.QUEUED)
     assigned_model: Mapped[Optional[str]] = mapped_column(String)
     flag: Mapped[Optional[str]] = mapped_column(String)
+    proposed_flag: Mapped[Optional[str]] = mapped_column(String)  # last flag the agent proposed
     created_at: Mapped[Optional[datetime]] = mapped_column(DateTime, default=datetime.utcnow)
 
     session: Mapped[Optional["CtfSession"]] = relationship(back_populates="challenges")
