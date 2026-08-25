@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     ARGUS_LLM_TIMEOUT: int = 120
     ARGUS_LLM_MAX_TOKENS: int = 4096
 
+    # API Keys for free providers.
+    ARGUS_OPENROUTER_API_KEY: str = ""
+    ARGUS_GROQ_API_KEY: str = ""
+
     # Agent loop guardrails.
     ARGUS_MAX_ITERATIONS: int = 30
     ARGUS_MAX_RUN_SECONDS: int = 1800

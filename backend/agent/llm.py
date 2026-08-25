@@ -7,6 +7,7 @@ owning provider for any model id so Argus can talk to more than one endpoint
 (and, later, free web gateways) without hardcoding a single provider.
 """
 import json
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -94,6 +95,15 @@ def _sanitize_messages(messages: list) -> list:
     return cleaned
 
 
+def _get_api_key(provider: dict) -> Optional[str]:
+    """Get the API key from the provider dict, falling back to env if needed."""
+    if provider.get("api_key"):
+        return provider["api_key"]
+    if provider.get("api_key_env"):
+        return os.environ.get(provider["api_key_env"])
+    return None
+
+
 async def generate_chat_completion(
     model: str,
     messages: list,
@@ -112,8 +122,9 @@ async def generate_chat_completion(
     url = f"{base_url}/chat/completions"
 
     headers = {}
-    if provider.get("api_key"):
-        headers["Authorization"] = f"Bearer {provider['api_key']}"
+    api_key = _get_api_key(provider)
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
 
     payload = {
         "model": model,
@@ -127,5 +138,15 @@ async def generate_chat_completion(
 
     async with httpx.AsyncClient(timeout=settings.ARGUS_LLM_TIMEOUT) as client:
         response = await client.post(url, json=payload, headers=headers)
+        if response.status_code == 429:
+            raise RateLimitError(f"Provider rate-limited: {provider.get('name')}")
+        if response.status_code == 402:
+            raise QuotaExceededError(f"Provider quota exceeded: {provider.get('name')}")
         response.raise_for_status()
         return response.json()
+
+class RateLimitError(Exception):
+    pass
+
+class QuotaExceededError(Exception):
+    pass

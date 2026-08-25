@@ -22,6 +22,59 @@
           "notes": "Tryable per-challenge model."
         }
       ]
+    },
+    {
+      "name": "Groq",
+      "api_type": "openai-completions",
+      "base_url": "https://api.groq.com/openai/v1",
+      "api_key_env": "ARGUS_GROQ_API_KEY",
+      "concurrency": 2,
+      "models": [
+        {
+          "id": "llama-3.3-70b-versatile",
+          "display_name": "Llama 3.3 70B (Groq, free)",
+          "ctx": 128000,
+          "free": true,
+          "notes": "Fast inference on Groq LPU. Excellent tool calling. Free tier: 30 RPM, 6000 RPD."
+        },
+        {
+          "id": "deepseek-r1-distill-llama-70b",
+          "display_name": "DeepSeek R1 70B (Groq, free)",
+          "ctx": 128000,
+          "free": true,
+          "notes": "Reasoning model. Good for complex analysis. Free tier: 30 RPM, 1000 RPD."
+        }
+      ]
+    },
+    {
+      "name": "OpenRouter",
+      "api_type": "openai-completions",
+      "base_url": "https://openrouter.ai/api/v1",
+      "api_key_env": "ARGUS_OPENROUTER_API_KEY",
+      "concurrency": 5,
+      "models": [
+        {
+          "id": "google/gemini-2.5-flash-preview",
+          "display_name": "Gemini 2.5 Flash (OpenRouter, free)",
+          "ctx": 1048576,
+          "free": true,
+          "notes": "1M context. Excellent tool calling. Free via OpenRouter."
+        },
+        {
+          "id": "meta-llama/llama-4-maverick:free",
+          "display_name": "Llama 4 Maverick (OpenRouter, free)",
+          "ctx": 131072,
+          "free": true,
+          "notes": "Large open model. Good tool use. Free tier."
+        },
+        {
+          "id": "deepseek/deepseek-chat-v3-0324:free",
+          "display_name": "DeepSeek V3 (OpenRouter, free)",
+          "ctx": 131072,
+          "free": true,
+          "notes": "Strong coding model. Free tier."
+        }
+      ]
     }
   ]
 }

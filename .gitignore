@@ -68,3 +68,7 @@ keys-ops/
 
 # Uploaded challenge artifacts (stored locally)
 backend/artifacts/
+
+# Frontend build artifacts + dependencies (Vite/Vue)
+node_modules/
+frontend/dist/

@@ -70,6 +70,7 @@ app.add_middleware(
 )
 
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 import os
 import json
@@ -124,13 +125,23 @@ active_agents: Dict[int, AgentLoop] = {}
 
 # Static frontend files served by the backend (same-origin)
 FRONTEND_DIR = Path(os.path.dirname(os.path.dirname(__file__))) / "frontend"
+FRONTEND_DIST = FRONTEND_DIR / "dist"
+
+# Serve built Vite assets (JS/CSS) if the production build exists. Mounted
+# only when present so the backend still imports cleanly before a first build.
+if (FRONTEND_DIST / "assets").is_dir():
+    app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIST / "assets")), name="assets")
 
 @app.get("/")
 async def serve_frontend():
-    try:
-        return HTMLResponse(content=(FRONTEND_DIR / "index.html").read_text(encoding="utf-8"))
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail="index.html not found") from e
+    # Prefer the built Vite app; fall back to the source index.html for dev.
+    built_index = FRONTEND_DIST / "index.html"
+    source_index = FRONTEND_DIR / "index.html"
+    if built_index.exists():
+        return HTMLResponse(content=built_index.read_text(encoding="utf-8"))
+    if source_index.exists():
+        return HTMLResponse(content=source_index.read_text(encoding="utf-8"))
+    raise HTTPException(status_code=404, detail="index.html not found")
 
 @app.get("/favicon.svg")
 async def serve_favicon():
