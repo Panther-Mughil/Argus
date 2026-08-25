@@ -2,15 +2,24 @@
   "providers": [
     {
       "name": "Onyx",
-      "api_key": null,
       "api_type": "openai-completions",
       "base_url": "http://10.0.2.2:12057/v1",
+      "api_key": null,
       "concurrency": 1,
       "models": [
         {
+          "id": "Qwen3.6-35B-A3B",
+          "display_name": "Qwen3.6 35B A3B",
+          "ctx": 131072,
+          "free": false,
+          "notes": "Stronger model; better for long-horizon forensics / multi-step chains."
+        },
+        {
           "id": "gpt-oss-20B",
           "display_name": "GPT-OSS 20B",
-          "ctx": 131072
+          "ctx": 131072,
+          "free": false,
+          "notes": "Default lightweight model."
         }
       ]
     }

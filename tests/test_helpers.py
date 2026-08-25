@@ -342,5 +342,32 @@ class TestPromptDestructiveGuidance(unittest.TestCase):
         self.assertIn("/workspace/16/originals", prompt)
 
 
+class TestModelRegistry(unittest.TestCase):
+    """REQ-006: the model registry exposes providers + models and resolves defaults."""
+
+    def test_default_model_is_configured(self):
+        from backend.agent import llm
+        self.assertIsInstance(llm.default_model(), str)
+        self.assertTrue(llm.default_model())
+
+    def test_model_list_shape(self):
+        from backend.agent import llm
+        rows = llm.model_list()
+        self.assertTrue(rows)
+        self.assertIn("id", rows[0])
+        self.assertIn("display_name", rows[0])
+        self.assertIn("provider", rows[0])
+        self.assertIn("base_url", rows[0])
+
+    def test_provider_for_model_resolves(self):
+        from backend.agent import llm
+        mid = llm.default_model()
+        provider = llm._provider_for_model(mid)
+        self.assertIsNotNone(provider)
+        assert provider is not None
+        self.assertTrue(provider["base_url"].startswith("http"))
+        self.assertIn(mid, llm.known_model_ids())
+
+
 if __name__ == "__main__":
     unittest.main()

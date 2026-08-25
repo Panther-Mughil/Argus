@@ -76,8 +76,10 @@ import json
 import asyncio
 from fastapi import WebSocket, WebSocketDisconnect, UploadFile, File
 from typing import Dict, List
+from pydantic import BaseModel
 
 from .agent.loop import AgentLoop
+from .agent.llm import model_list, default_model, known_model_ids
 from backend.storage import (
     list_files,
     save_upload,
@@ -150,15 +152,41 @@ async def get_challenges(db: AsyncSession = Depends(get_db)):
     challenges = result.scalars().all()
     return challenges
 
+@app.get("/api/models")
+async def get_models():
+    """List available models from the registry (drives the UI dropdown)."""
+    return {"models": model_list(), "default_model": default_model()}
+
+
+class _ModelChoice(BaseModel):
+    model: str
+
+
+@app.post("/api/challenges/{challenge_id}/model")
+async def set_challenge_model(challenge_id: int, choice: _ModelChoice, db: AsyncSession = Depends(get_db)):
+    """Set the model used for a challenge's next agent run."""
+    challenge = await db.get(Challenge, challenge_id)
+    if not challenge:
+        raise HTTPException(status_code=404, detail="Challenge not found")
+    if choice.model not in known_model_ids():
+        raise HTTPException(status_code=400, detail=f"Unknown model '{choice.model}'")
+    challenge.assigned_model = choice.model
+    await db.commit()
+    return {"status": "ok", "assigned_model": challenge.assigned_model}
+
+
 @app.post("/api/challenges")
-async def create_challenge(title: str, description: str, category: str, db: AsyncSession = Depends(get_db)):
+async def create_challenge(title: str, description: str, category: str, assigned_model: str = "", db: AsyncSession = Depends(get_db)):
     if category not in CHALLENGE_CATEGORIES:
         raise HTTPException(status_code=400, detail=f"Invalid category. Must be one of: {', '.join(sorted(CHALLENGE_CATEGORIES))}")
+    if assigned_model and assigned_model not in known_model_ids():
+        raise HTTPException(status_code=400, detail=f"Unknown model '{assigned_model}'")
     new_challenge = Challenge(
         title=title,
         description=description,
         category=category,
-        status=ChallengeStatus.QUEUED
+        status=ChallengeStatus.QUEUED,
+        assigned_model=assigned_model or None,
     )
     db.add(new_challenge)
     await db.commit()
@@ -181,6 +209,7 @@ async def start_agent(challenge_id: int, db: AsyncSession = Depends(get_db)):
         challenge.title,
         challenge.description or "",
         challenge.category or "",
+        challenge.assigned_model or "",
     )
     active_agents[challenge_id] = agent
     asyncio.create_task(agent.run())
@@ -241,6 +270,7 @@ async def restart_agent(challenge_id: int, db: AsyncSession = Depends(get_db)):
         challenge.title,
         challenge.description or "",
         challenge.category or "",
+        challenge.assigned_model or "",
     )
     active_agents[challenge_id] = agent
     asyncio.create_task(agent.run())

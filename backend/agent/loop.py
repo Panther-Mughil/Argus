@@ -339,7 +339,7 @@ def _protected_write_message(resolved_path: str, challenge_id: int) -> str:
 
 
 class AgentLoop:
-    def __init__(self, challenge_id: int, websocket_manager, challenge_title: str, challenge_desc: str, category: str = ""):
+    def __init__(self, challenge_id: int, websocket_manager, challenge_title: str, challenge_desc: str, category: str = "", model: str = ""):
         self.challenge_id = challenge_id
         self.websocket_manager = websocket_manager
         self.running = False
@@ -347,7 +347,7 @@ class AgentLoop:
         # Starts *cleared* so the loop blocks when paused; reject_flag()/stop() set it.
         self._resume_event = asyncio.Event()
         self._proposed_flag: str | None = None
-        self.model = settings.ARGUS_MODEL or default_model()
+        self.model = model or settings.ARGUS_MODEL or default_model()
         self._goal = extract_goal(challenge_desc)
         self.sandbox = SandboxManager()
 

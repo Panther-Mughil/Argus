@@ -185,6 +185,24 @@
                                     class="w-full bg-cocoa border border-sand/40 rounded p-2 text-cream text-sm resize-none h-24 focus:border-mint focus:ring-1 focus:ring-mint"
                                 ></textarea>
                             </div>
+                            <div class="mb-4">
+                                <label
+                                    class="block text-sm font-medium text-cream mb-1.5"
+                                    >Model</label
+                                >
+                                <select
+                                    v-model="newChallenge.model"
+                                    class="w-full bg-cocoa border border-sand/40 rounded p-2 text-cream appearance-none focus:border-mint focus:ring-1 focus:ring-mint"
+                                >
+                                    <option
+                                        v-for="m in models"
+                                        :key="m.id"
+                                        :value="m.id"
+                                    >
+                                        {{ m.display_name }} ({{ m.provider }})
+                                    </option>
+                                </select>
+                            </div>
                             <button
                                 type="submit"
                                 class="w-full bg-mint text-cocoa font-medium rounded-lg py-2.5 px-4 hover:bg-mint/90 transition"
@@ -244,9 +262,19 @@
                                 >
                                     MODEL
                                 </div>
-                                <div class="font-mono font-medium text-cream">
-                                    GPT-OSS-20B
-                                </div>
+                                <select
+                                    v-model="modelChoice"
+                                    @change="setChallengeModel(modelChoice)"
+                                    class="font-mono text-sm text-cream bg-cocoa border border-sand/40 rounded-lg px-2 py-1.5 w-full"
+                                >
+                                    <option
+                                        v-for="m in models"
+                                        :key="m.id"
+                                        :value="m.id"
+                                    >
+                                        {{ m.display_name }} ({{ m.provider }})
+                                    </option>
+                                </select>
                             </div>
                             <div class="flex space-x-2 mt-4">
                                 <button
@@ -446,6 +474,7 @@
                         title: "",
                         category: CHALLENGE_CATEGORIES[0],
                         description: "",
+                        model: "",
                     });
                     const selectedChallenge = ref(null);
 
@@ -457,6 +486,10 @@
 
                     const API_BASE = "http://localhost:8000/api";
                     const WS_BASE = "ws://localhost:8000/api/ws";
+
+                    const models = ref([]);
+                    const defaultModel = ref("");
+                    const modelChoice = ref("");
 
                     const fetchChallenges = async () => {
                         try {
@@ -474,22 +507,60 @@
                         }
                     };
 
+                    const fetchModels = async () => {
+                        try {
+                            const res = await fetch(`${API_BASE}/models`);
+                            const data = await res.json();
+                            models.value = data.models || [];
+                            defaultModel.value = data.default_model || "";
+                            if (!newChallenge.value.model && defaultModel.value) {
+                                newChallenge.value.model = defaultModel.value;
+                            }
+                        } catch (e) {
+                            console.error("Failed to fetch models", e);
+                        }
+                    };
+
                     const createChallenge = async () => {
                         try {
                             await fetch(
-                                `${API_BASE}/challenges?title=${encodeURIComponent(newChallenge.value.title)}&category=${encodeURIComponent(newChallenge.value.category)}&description=${encodeURIComponent(newChallenge.value.description)}`,
+                                `${API_BASE}/challenges?title=${encodeURIComponent(newChallenge.value.title)}&category=${encodeURIComponent(newChallenge.value.category)}&description=${encodeURIComponent(newChallenge.value.description)}&assigned_model=${encodeURIComponent(newChallenge.value.model || "")}`,
                                 {
                                     method: "POST",
                                 },
                             );
-                            newChallenge.value = {
-                                title: "",
-                                category: CHALLENGE_CATEGORIES[0],
-                                description: "",
-                            };
+                                newChallenge.value = {
+                                    title: "",
+                                    category: CHALLENGE_CATEGORIES[0],
+                                    description: "",
+                                    model: defaultModel.value || "",
+                                };
                             await fetchChallenges();
                         } catch (e) {
                             console.error("Failed to create challenge", e);
+                        }
+                    };
+
+                    const setChallengeModel = async (modelId) => {
+                        if (!selectedChallenge.value || !modelId) return;
+                        try {
+                            const r = await fetch(
+                                `${API_BASE}/challenges/${selectedChallenge.value.id}/model`,
+                                {
+                                    method: "POST",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({ model: modelId }),
+                                },
+                            );
+                            if (!r.ok) {
+                                console.error("Set model failed", r.status);
+                                return;
+                            }
+                            if (selectedChallenge.value)
+                                selectedChallenge.value.assigned_model = modelId;
+                            await fetchChallenges();
+                        } catch (e) {
+                            console.error("Failed to set model", e);
                         }
                     };
 
@@ -519,6 +590,7 @@
                         selectedChallenge.value = challenge;
                         connectWebSocket(challenge.id);
                         fetchFiles(challenge.id);
+                        modelChoice.value = challenge.assigned_model || defaultModel.value;
                     };
 
                     const startAgent = async () => {
@@ -673,6 +745,7 @@
 
                     onMounted(() => {
                         fetchChallenges();
+                        fetchModels();
                         // Poll challenges to update status (in real app, use SSE or WS for challenge list too)
                         setInterval(fetchChallenges, 5000);
                     });
@@ -680,6 +753,10 @@
                     return {
                         challenges,
                         selectedChallenge,
+                        models,
+                        modelChoice,
+                        setChallengeModel,
+                        defaultModel,
                         newChallenge,
                         logs,
                         interventionText,
