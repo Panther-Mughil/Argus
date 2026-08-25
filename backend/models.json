@@ -12,14 +12,14 @@
           "display_name": "Qwen3.6 35B A3B",
           "ctx": 131072,
           "free": false,
-          "notes": "Stronger model; better for long-horizon forensics / multi-step chains."
+          "notes": "Proven solver; strong for long-horizon forensics. Default."
         },
         {
-          "id": "gpt-oss-20B",
-          "display_name": "GPT-OSS 20B",
+          "id": "Gemma-4-26B-A4B",
+          "display_name": "Gemma 4 26B A4B",
           "ctx": 131072,
           "free": false,
-          "notes": "Default lightweight model."
+          "notes": "Tryable per-challenge model."
         }
       ]
     }

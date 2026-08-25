@@ -43,7 +43,7 @@ def default_model() -> str:
     for provider in MODELS_CONFIG["providers"]:
         for model in provider.get("models") or []:
             return model["id"]
-    return "gpt-oss-20B"
+    return "Qwen3.6-35B-A3B"
 
 
 def model_list() -> list[dict]:
