@@ -513,7 +513,10 @@
                             const data = await res.json();
                             models.value = data.models || [];
                             defaultModel.value = data.default_model || "";
-                            if (!newChallenge.value.model && defaultModel.value) {
+                            if (
+                                !newChallenge.value.model &&
+                                defaultModel.value
+                            ) {
                                 newChallenge.value.model = defaultModel.value;
                             }
                         } catch (e) {
@@ -529,12 +532,12 @@
                                     method: "POST",
                                 },
                             );
-                                newChallenge.value = {
-                                    title: "",
-                                    category: CHALLENGE_CATEGORIES[0],
-                                    description: "",
-                                    model: defaultModel.value || "",
-                                };
+                            newChallenge.value = {
+                                title: "",
+                                category: CHALLENGE_CATEGORIES[0],
+                                description: "",
+                                model: defaultModel.value || "",
+                            };
                             await fetchChallenges();
                         } catch (e) {
                             console.error("Failed to create challenge", e);
@@ -548,7 +551,9 @@
                                 `${API_BASE}/challenges/${selectedChallenge.value.id}/model`,
                                 {
                                     method: "POST",
-                                    headers: { "Content-Type": "application/json" },
+                                    headers: {
+                                        "Content-Type": "application/json",
+                                    },
                                     body: JSON.stringify({ model: modelId }),
                                 },
                             );
@@ -557,7 +562,8 @@
                                 return;
                             }
                             if (selectedChallenge.value)
-                                selectedChallenge.value.assigned_model = modelId;
+                                selectedChallenge.value.assigned_model =
+                                    modelId;
                             await fetchChallenges();
                         } catch (e) {
                             console.error("Failed to set model", e);
@@ -590,7 +596,8 @@
                         selectedChallenge.value = challenge;
                         connectWebSocket(challenge.id);
                         fetchFiles(challenge.id);
-                        modelChoice.value = challenge.assigned_model || defaultModel.value;
+                        modelChoice.value =
+                            challenge.assigned_model || defaultModel.value;
                     };
 
                     const startAgent = async () => {
