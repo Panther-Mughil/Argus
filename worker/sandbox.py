@@ -3,10 +3,12 @@ from typing import Optional
 
 import logging
 import shlex
+from pathlib import Path
 
 import paramiko
 
 from backend.config import settings
+from .host_registry import acquire_host, release_host, select_host
 
 logger = logging.getLogger(__name__)
 
@@ -21,42 +23,67 @@ class SandboxManager:
 
     def __init__(self) -> None:
         self._client: Optional[paramiko.SSHClient] = None
+        self._host: Optional[dict] = None
+        self._acquired: bool = False
+
+    def _resolve_host(self) -> dict:
+        host = self._host
+        if host is None:
+            host = select_host()
+            self._host = host
+        return host
+
+    def _host_key_path(self, host: dict) -> str:
+        key = str(host.get("ssh_key", "")).strip()
+        if key:
+            key_path = Path(key)
+            if not key_path.is_absolute():
+                return str(Path(__file__).resolve().parent.parent / key_path)
+            return str(key_path)
+        return settings.resolved_ssh_key_path
 
     # ------------------------------------------------------------------
     # Connection helpers
     # ------------------------------------------------------------------
 
     def connect(self) -> None:
-        """Open a persistent SSH connection to the container.
+        """Open a persistent SSH connection to a selected container host.
 
         Raises ``ConnectionError`` with a human-readable message if the
-        container cannot be reached.
+        selected host cannot be reached.
         """
         if self._client is not None:
             # Already connected – just verify the transport is alive.
-            if not self._client.get_transport():
-                self._client.close()
-                self._client = None
+            if self._client.get_transport():
+                return
+            self._client.close()
+            self._client = None
 
-        if self._client is None:
-            client = paramiko.SSHClient()
-            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            key_path = settings.resolved_ssh_key_path
-            try:
-                client.connect(
-                    hostname=settings.ARGUS_CONTAINER_HOST,
-                    port=settings.ARGUS_CONTAINER_PORT,
-                    username=settings.ARGUS_CONTAINER_USER,
-                    key_filename=key_path,
-                    timeout=10,
-                )
-            except Exception as exc:
-                raise ConnectionError(
-                    f"Sandbox unreachable: is kali-forensics running and "
-                    f"reachable at {settings.ARGUS_CONTAINER_HOST}:{settings.ARGUS_CONTAINER_PORT}? "
-                    f"({exc})"
-                ) from exc
-            self._client = client
+        host = self._resolve_host()
+        if host is None:
+            raise ConnectionError("No container host configured")
+
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        key_path = self._host_key_path(host)
+        try:
+            client.connect(
+                hostname=host["host"],
+                port=host.get("port", 2222),
+                username=host.get("user", "root"),
+                key_filename=key_path,
+                timeout=10,
+            )
+        except Exception as exc:
+            raise ConnectionError(
+                f"Sandbox unreachable: is {host.get('name', 'sandbox')} running and "
+                f"reachable at {host['host']}:{host.get('port', 2222)}? "
+                f"({exc})"
+            ) from exc
+        self._client = client
+        if not self._acquired:
+            acquire_host(host["name"])
+            self._acquired = True
 
     def ping(self) -> bool:
         """Quick connectivity check."""
@@ -220,7 +247,7 @@ class SandboxManager:
         self.disconnect()
 
     def disconnect(self) -> None:
-        """Explicitly close the SSH connection."""
+        """Explicitly close the SSH connection and release the host slot."""
         client, self._client = self._client, None
         if client is not None:
             try:
@@ -228,3 +255,6 @@ class SandboxManager:
             except Exception as exc:
                 # Connection may already be gone — nothing to recover.
                 logger.debug("Ignoring error while closing SSH transport: %s", exc)
+        if self._host is not None and self._acquired:
+            release_host(self._host["name"])
+            self._acquired = False

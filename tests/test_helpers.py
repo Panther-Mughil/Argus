@@ -6,6 +6,8 @@ Run with:  python -m unittest discover -s tests
 import unittest
 import asyncio
 
+import worker.host_registry as host_registry  # type: ignore
+
 from backend.agent.loop import (
     CORE_PROMPT,
     build_system_prompt,
@@ -367,6 +369,74 @@ class TestModelRegistry(unittest.TestCase):
         assert provider is not None
         self.assertTrue(provider["base_url"].startswith("http"))
         self.assertIn(mid, llm.known_model_ids())
+
+
+class TestHostRegistry(unittest.TestCase):
+    """Tests for the multi-host container registry + load balancer."""
+
+    def setUp(self):
+        self._orig_config = host_registry.HOSTS_CONFIG
+        self._orig_health = host_registry._health_check_func
+        self._orig_active = dict(host_registry._active_counts)
+        self._orig_rr = host_registry._round_robin_index
+        # Bypass real network calls during unit tests.
+        host_registry._health_check_func = lambda host, port: True
+
+    def tearDown(self):
+        host_registry.HOSTS_CONFIG = self._orig_config
+        host_registry._health_check_func = self._orig_health
+        host_registry._active_counts.clear()
+        host_registry._active_counts.update(self._orig_active)
+        host_registry._round_robin_index = self._orig_rr
+
+    def _set_hosts(self, hosts):
+        host_registry.HOSTS_CONFIG = {"hosts": hosts}
+        host_registry._active_counts.clear()
+        host_registry._round_robin_index = 0
+
+    def test_list_hosts_contains_argus_kali(self):
+        hosts = host_registry.list_hosts()
+        self.assertTrue(hosts)
+        self.assertEqual(hosts[0]["name"], "argus-kali")
+
+    def test_select_host_returns_default(self):
+        host = host_registry.select_host()
+        self.assertEqual(host["name"], "argus-kali")
+
+    def test_select_host_skips_unhealthy(self):
+        self._set_hosts([
+            {"name": "bad", "host": "10.0.0.1", "port": 22, "healthy": False, "concurrency": 1, "max_challenges": 8},
+            {"name": "good", "host": "10.0.0.2", "port": 22, "healthy": True, "concurrency": 1, "max_challenges": 8},
+        ])
+        host = host_registry.select_host()
+        self.assertEqual(host["name"], "good")
+
+    def test_select_host_round_robin(self):
+        self._set_hosts([
+            {"name": "a", "host": "10.0.0.1", "port": 22, "healthy": True, "concurrency": 1, "max_challenges": 8},
+            {"name": "b", "host": "10.0.0.2", "port": 22, "healthy": True, "concurrency": 1, "max_challenges": 8},
+        ])
+        first = host_registry.select_host()
+        second = host_registry.select_host()
+        self.assertNotEqual(first["name"], second["name"])
+
+    def test_select_host_falls_back_when_all_at_capacity(self):
+        self._set_hosts([
+            {"name": "a", "host": "10.0.0.1", "port": 22, "healthy": True, "concurrency": 1, "max_challenges": 1},
+            {"name": "b", "host": "10.0.0.2", "port": 22, "healthy": True, "concurrency": 1, "max_challenges": 1},
+        ])
+        host = host_registry.select_host(active={"a": 1, "b": 1})
+        # Fallback ignores capacity and returns the first healthy host.
+        self.assertEqual(host["name"], "a")
+
+    def test_acquire_release_count(self):
+        host_registry._active_counts.clear()
+        host_registry.acquire_host("a")
+        host_registry.acquire_host("a")
+        host_registry.release_host("a")
+        self.assertEqual(host_registry.active_count("a"), 1)
+        host_registry.release_host("a")
+        self.assertEqual(host_registry.active_count("a"), 0)
 
 
 if __name__ == "__main__":

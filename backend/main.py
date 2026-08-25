@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -176,7 +176,20 @@ async def set_challenge_model(challenge_id: int, choice: _ModelChoice, db: Async
 
 
 @app.post("/api/challenges")
-async def create_challenge(title: str, description: str, category: str, assigned_model: str = "", db: AsyncSession = Depends(get_db)):
+async def create_challenge(
+    title: str = Form(...),
+    category: str = Form(...),
+    description: str = Form(""),
+    assigned_model: str = Form(""),
+    files: List[UploadFile] = File([]),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a challenge (multipart/form-data).
+
+    Accepts form fields plus one or more attached files (field name
+    ``files``). Files are stored locally under ``backend/artifacts/{id}/``
+    like the post-create upload endpoint. No ``flag`` field is exposed.
+    """
     if category not in CHALLENGE_CATEGORIES:
         raise HTTPException(status_code=400, detail=f"Invalid category. Must be one of: {', '.join(sorted(CHALLENGE_CATEGORIES))}")
     if assigned_model and assigned_model not in known_model_ids():
@@ -191,7 +204,34 @@ async def create_challenge(title: str, description: str, category: str, assigned
     db.add(new_challenge)
     await db.commit()
     await db.refresh(new_challenge)
-    return new_challenge
+
+    uploaded = []
+    for upload in files or []:
+        filename = upload.filename or ""
+        try:
+            safe_name = sanitize_filename(filename)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid filename")
+        try:
+            # Stream to disk in a worker thread so we don't block the loop.
+            path = await asyncio.to_thread(
+                save_upload, new_challenge.id, safe_name, upload.file
+            )
+        except OversizeError as exc:
+            raise HTTPException(status_code=413, detail=str(exc))
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=f"Failed to store file: {exc}")
+        uploaded.append({"filename": path.name, "size": path.stat().st_size})
+
+    return {
+        "id": new_challenge.id,
+        "title": new_challenge.title,
+        "description": new_challenge.description,
+        "category": new_challenge.category,
+        "status": new_challenge.status,
+        "assigned_model": new_challenge.assigned_model,
+        "uploaded_files": uploaded,
+    }
 
 @app.post("/api/challenges/{challenge_id}/start")
 async def start_agent(challenge_id: int, db: AsyncSession = Depends(get_db)):

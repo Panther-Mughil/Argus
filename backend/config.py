@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     ARGUS_CONTAINER_SSH_KEY: str = "/mnt/D/Shared/Mughil/Personal/HomeLab/SSH_Keys/argus"
     ARGUS_CONTAINER_CMD_TIMEOUT: int = 120
 
+    # Container-host registry (mirrors models.json; supports multi-host load balancing).
+    ARGUS_HOSTS_PATH: str = "backend/hosts.json"
+
     # Uploaded challenge artifacts (stored locally, gitignored).
     ARGUS_ARTIFACTS_DIR: str = "backend/artifacts"
     # Per-file upload cap, in MB.

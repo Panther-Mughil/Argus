@@ -188,6 +188,18 @@
                             <div class="mb-4">
                                 <label
                                     class="block text-sm font-medium text-cream mb-1.5"
+                                    >Files (optional)</label
+                                >
+                                <input
+                                    ref="createFileInput"
+                                    type="file"
+                                    multiple
+                                    class="w-full bg-cocoa border border-sand/40 rounded p-2 text-cream file:mr-3 file:bg-plum file:text-mint file:border-0 file:rounded file:px-3 file:py-1"
+                                />
+                            </div>
+                            <div class="mb-4">
+                                <label
+                                    class="block text-sm font-medium text-cream mb-1.5"
                                     >Model</label
                                 >
                                 <select
@@ -482,6 +494,7 @@
                     const interventionText = ref("");
                     const selectedChallengeFiles = ref([]);
                     const fileInput = ref(null);
+                    const createFileInput = ref(null);
                     let ws = null;
 
                     const API_BASE = "http://localhost:8000/api";
@@ -526,18 +539,39 @@
 
                     const createChallenge = async () => {
                         try {
-                            await fetch(
-                                `${API_BASE}/challenges?title=${encodeURIComponent(newChallenge.value.title)}&category=${encodeURIComponent(newChallenge.value.category)}&description=${encodeURIComponent(newChallenge.value.description)}&assigned_model=${encodeURIComponent(newChallenge.value.model || "")}`,
-                                {
-                                    method: "POST",
-                                },
+                            const fd = new FormData();
+                            fd.append("title", newChallenge.value.title);
+                            fd.append("category", newChallenge.value.category);
+                            fd.append(
+                                "description",
+                                newChallenge.value.description || "",
                             );
+                            fd.append(
+                                "assigned_model",
+                                newChallenge.value.model || "",
+                            );
+                            const createInput = createFileInput.value;
+                            if (
+                                createInput &&
+                                createInput.files &&
+                                createInput.files.length > 0
+                            ) {
+                                for (const f of createInput.files) {
+                                    fd.append("files", f);
+                                }
+                            }
+                            await fetch(`${API_BASE}/challenges`, {
+                                method: "POST",
+                                body: fd,
+                            });
                             newChallenge.value = {
                                 title: "",
                                 category: CHALLENGE_CATEGORIES[0],
                                 description: "",
                                 model: defaultModel.value || "",
                             };
+                            if (createFileInput.value)
+                                createFileInput.value.value = "";
                             await fetchChallenges();
                         } catch (e) {
                             console.error("Failed to create challenge", e);
@@ -780,6 +814,7 @@
                         rejectFlag,
                         selectedChallengeFiles,
                         fileInput,
+                        createFileInput,
                         uploadFile,
                         fetchFiles,
                         formatBytes,

@@ -1,0 +1,123 @@
+{
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "execute_command",
+        "description": "Run a shell command inside the isolated Kali Linux CTF sandbox. Use this for any filesystem, network, or tooling operation. The result includes the exit code, stdout, and stderr — use them to detect failures. Prefer non-interactive commands and pipe large output through head/tail/grep.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "command": {"type": "string", "description": "The bash command to run."}
+          },
+          "required": ["command"]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "read_file",
+        "description": "Read a bounded slice of a file in the sandbox by byte offset. Use this to page through a large file instead of dumping it all. You may read files under /workspace/{id}/ (challenge dir), but writes are restricted to /workspace/{id}/work/.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {"type": "string", "description": "Absolute path in the sandbox."},
+            "offset": {"type": "integer", "description": "Byte offset to start at (default 0)."},
+            "limit": {"type": "integer", "description": "Max bytes to read (default 6000)."}
+          },
+          "required": ["path"]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "write_file",
+        "description": "Write content to a file in the sandbox (e.g. a small analysis/decoding script). Parent directories are created automatically. You can ONLY write under /workspace/{id}/work/. For evidence files, copy from originals/ first: `cp originals/<name> work/`.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {"type": "string", "description": "Absolute path in the sandbox (must be under work/)."},
+            "content": {"type": "string", "description": "Text to write."}
+          },
+          "required": ["path", "content"]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "search_files",
+        "description": "Recursively search files under a directory for a regular expression (uses ripgrep). Defaults to the work directory. Use this to hunt for flags across extracted artifacts.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {"type": "string", "description": "Directory to search (default: work/ dir)."},
+            "pattern": {"type": "string", "description": "Regex; defaults to a flag-like pattern."}
+          },
+          "required": ["path"]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "submit_flag",
+        "description": "Propose the flag you believe is correct. The run then pauses for a human to verify it. If the human rejects it, you will be asked to keep looking.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "flag": {"type": "string", "description": "The exact flag string."}
+          },
+          "required": ["flag"]
+        }
+      }
+    }
+  ],
+  "toolcheck": "for t in 7z binwalk exiftool fls icat mmls tsk_recover foremost testdisk xxd file strings dd tar gzip unzip python3 rg grep; do command -v \"$t\" >/dev/null 2>&1 && echo \"YES $t\" || echo \"NO  $t\"; done",
+  "category_tools": {
+    "Forensics": {
+      "primary_tools": ["file", "xxd", "strings", "exiftool", "binwalk", "7z", "tar", "python3"],
+      "secondary_tools": ["mmls", "fls", "icat", "tsk_recover", " foremost", "testdisk"],
+      "network_tools": ["tshark", "tcpflow"],
+      "usage": "For disk images use 7z x or binwalk -e to extract. For PCAPs use tshark to follow streams. Metadata answers often hide in exiftool output. Search for the flag pattern (not the word 'flag') in extracted content."
+    },
+    "Cryptography": {
+      "primary_tools": ["python3", "xxd", "strings"],
+      "secondary_tools": [],
+      "cipher_tools": ["openssl"],
+      "usage": "Implement crypto attacks with Python scripts. Try frequency analysis, known-plaintext, weak RSA factors, padding oracles. Use write_file to create the script, then execute_command to run it. Validate candidates against expected flag format."
+    },
+    "Pwn": {
+      "primary_tools": ["file", "checksec", "readelf", "objdump", "python3"],
+      "secondary_tools": ["gdb", "pwntools"],
+      "usage": "Inspect binary with file/checksec/readelf/objdump. Identify vulnerability type. Write exploit in Python. Run locally in sandbox with python3 exploit.py."
+    },
+    "Reverse Engineering": {
+      "primary_tools": ["file", "strings", "readelf", "objdump", "python3"],
+      "secondary_tools": ["gdb", "radare2", "rizin", "ghidra"],
+      "usage": "Analyze binary with disassemblers. Trace flag-check logic. Reconstruct the input that produces the flag. Use write_file for analysis scripts."
+    },
+    "Web": {
+      "primary_tools": ["curl", "python3", "grep", "jq"],
+      "secondary_tools": ["sqlmap", "nikto"],
+      "usage": "Enumerate with curl. Inspect source/headers/cookies. Look for SQLi, XSS, SSRF, IDOR, path traversal, deserialization. Use curl to interact with provided URLs."
+    },
+    "OSINT": {
+      "primary_tools": ["file", "strings", "exiftool", "python3", "grep"],
+      "secondary_tools": ["whois", "dig"],
+      "usage": "Correlate clues from artifacts and metadata. Trace timestamps and identifiers. Document reasoning. Search for name patterns and contextual clues."
+    },
+    "Steganography": {
+      "primary_tools": ["file", "exiftool", "strings", "binwalk", "python3", "xxd"],
+      "secondary_tools": ["zsteg", "steghide", "stegano"],
+      "usage": "Inspect files with file/exiftool/strings/binwalk. Check for hidden data in images, audio, LSB planes. Decode the steganographic payload. Carve embedded content."
+    },
+    "Misc": {
+      "primary_tools": ["python3", "strings", "file", "xxd", "grep", "base64"],
+      "secondary_tools": [],
+      "usage": "Identify the puzzle type (encoding, scripting, logic). Solve with small Python scripts and careful observation. Try multiple approaches."
+    }
+  }
+}

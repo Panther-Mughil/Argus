@@ -1,0 +1,16 @@
+{
+  "_comment": "Container host registry for Argus sandboxes. The currently-running shared instance is still named 'kali-forensics'; the target/renamed container is 'argus-kali'.",
+  "hosts": [
+    {
+      "name": "argus-kali",
+      "host": "10.0.2.6",
+      "port": 2222,
+      "user": "root",
+      "ssh_key": "",
+      "concurrency": 4,
+      "max_challenges": 8,
+      "healthy": true,
+      "notes": "Maps to the existing shared kali-forensics container until the argus-kali image replaces it."
+    }
+  ]
+}
