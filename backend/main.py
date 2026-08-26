@@ -7,7 +7,8 @@ from sqlalchemy import text, delete
 from contextlib import asynccontextmanager
 
 from .db.database import engine, Base, get_db
-from .db.models import Challenge, ChallengeStatus
+from .db.models import Challenge, ChallengeStatus, User
+from .auth import auth_router, teams_router, seed_admin_user, get_current_user
 
 # Adds FLAG_PROPOSED to the native Postgres enum if the DB was created before
 # that value existed. Idempotent on Postgres 12+ (compose uses postgres:15).
@@ -50,6 +51,24 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         # Non-fatal: only matters for DBs created before FLAG_PROPOSED existed.
         print(f"Enum migration skipped: {exc}")
+
+    # User auth columns (no Alembic) — idempotent startup migration.
+    try:
+        async with engine.connect() as conn:
+            await conn.exec_driver_sql("ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR")
+            await conn.exec_driver_sql("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash VARCHAR")
+            await conn.exec_driver_sql("ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR DEFAULT 'user'")
+            await conn.commit()
+    except Exception as exc:
+        print(f"User auth migration skipped: {exc}")
+
+    # Seed the default admin account.
+    try:
+        from .db.database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            await seed_admin_user(session)
+    except Exception as exc:
+        print(f"Admin seed skipped: {exc}")
     yield
 
 
@@ -68,6 +87,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(auth_router)
+app.include_router(teams_router)
 
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -158,13 +180,13 @@ async def health_check():
     return {"status": "ok", "message": "Argus Backend is running."}
 
 @app.get("/api/challenges")
-async def get_challenges(db: AsyncSession = Depends(get_db)):
+async def get_challenges(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Challenge))
     challenges = result.scalars().all()
     return challenges
 
 @app.get("/api/models")
-async def get_models():
+async def get_models(current_user: User = Depends(get_current_user)):
     """List available models from the registry (drives the UI dropdown)."""
     return {"models": model_list(), "default_model": default_model()}
 
@@ -174,7 +196,7 @@ class _ModelChoice(BaseModel):
 
 
 @app.post("/api/challenges/{challenge_id}/model")
-async def set_challenge_model(challenge_id: int, choice: _ModelChoice, db: AsyncSession = Depends(get_db)):
+async def set_challenge_model(challenge_id: int, choice: _ModelChoice, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """Set the model used for a challenge's next agent run."""
     challenge = await db.get(Challenge, challenge_id)
     if not challenge:
@@ -188,6 +210,7 @@ async def set_challenge_model(challenge_id: int, choice: _ModelChoice, db: Async
 
 @app.post("/api/challenges")
 async def create_challenge(
+    current_user: User = Depends(get_current_user),
     title: str = Form(...),
     category: str = Form(...),
     description: str = Form(""),
@@ -245,7 +268,7 @@ async def create_challenge(
     }
 
 @app.post("/api/challenges/{challenge_id}/start")
-async def start_agent(challenge_id: int, db: AsyncSession = Depends(get_db)):
+async def start_agent(challenge_id: int, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     challenge = await db.get(Challenge, challenge_id)
     if not challenge:
         raise HTTPException(status_code=404, detail="Challenge not found")
@@ -268,7 +291,7 @@ async def start_agent(challenge_id: int, db: AsyncSession = Depends(get_db)):
     return {"status": "Agent started"}
 
 @app.post("/api/challenges/{challenge_id}/stop")
-async def stop_agent(challenge_id: int, db: AsyncSession = Depends(get_db)):
+async def stop_agent(challenge_id: int, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     challenge = await db.get(Challenge, challenge_id)
     if not challenge:
         raise HTTPException(status_code=404, detail="Challenge not found")
@@ -284,7 +307,7 @@ async def stop_agent(challenge_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @app.post("/api/challenges/{challenge_id}/restart")
-async def restart_agent(challenge_id: int, db: AsyncSession = Depends(get_db)):
+async def restart_agent(challenge_id: int, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """Re-run a challenge's agent completely fresh, without deleting the challenge
     or re-uploading its files.
 
@@ -329,7 +352,7 @@ async def restart_agent(challenge_id: int, db: AsyncSession = Depends(get_db)):
     return {"status": "Agent restarted"}
 
 @app.post("/api/challenges/{challenge_id}/solved")
-async def mark_solved(challenge_id: int, db: AsyncSession = Depends(get_db)):
+async def mark_solved(challenge_id: int, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """Mark a challenge solved after a human confirms the proposed flag."""
     challenge = await db.get(Challenge, challenge_id)
     if not challenge:
@@ -347,6 +370,7 @@ async def mark_solved(challenge_id: int, db: AsyncSession = Depends(get_db)):
 @app.post("/api/challenges/{challenge_id}/files", status_code=201)
 async def upload_challenge_file(
     challenge_id: int,
+    current_user: User = Depends(get_current_user),
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
 ):
@@ -378,7 +402,7 @@ async def upload_challenge_file(
     return {"filename": path.name, "size": path.stat().st_size}
 
 @app.get("/api/challenges/{challenge_id}/files")
-async def list_challenge_files(challenge_id: int, db: AsyncSession = Depends(get_db)):
+async def list_challenge_files(challenge_id: int, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """List the uploaded files for a challenge."""
     challenge = await db.get(Challenge, challenge_id)
     if not challenge:
@@ -394,7 +418,7 @@ def _cleanup_remote_workspace(challenge_id: int) -> None:
 
 
 @app.delete("/api/challenges/{challenge_id}")
-async def delete_challenge(challenge_id: int, db: AsyncSession = Depends(get_db)):
+async def delete_challenge(challenge_id: int, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     challenge = await db.get(Challenge, challenge_id)
     if not challenge:
         raise HTTPException(status_code=404, detail="Challenge not found")

@@ -40,6 +40,9 @@ class User(Base):
     __tablename__ = "users"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     username: Mapped[str] = mapped_column(String, unique=True, index=True)
+    email: Mapped[Optional[str]] = mapped_column(String, unique=True, nullable=True)
+    password_hash: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    role: Mapped[str] = mapped_column(String, default="user")
     team_id: Mapped[Optional[int]] = mapped_column(ForeignKey("teams.id"))
 
     team: Mapped[Optional["Team"]] = relationship(back_populates="users")

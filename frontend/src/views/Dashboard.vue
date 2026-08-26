@@ -1,20 +1,5 @@
 <template>
-    <div class="max-w-[1200px] mx-auto px-6 py-8">
-        <header
-            class="flex justify-between items-center py-4 border-b border-sand/30 mb-6"
-        >
-            <div class="flex items-center space-x-3">
-                <img
-                    src="/favicon.svg"
-                    alt="Argus Logo"
-                    class="w-10 h-10"
-                />
-                <h1 class="text-2xl font-medium tracking-[0.02em] text-cream">
-                    Argus
-                </h1>
-            </div>
-        </header>
-
+    <div class="max-w-[1200px] mx-auto">
         <main class="grid grid-cols-1 md:grid-cols-3 gap-6">
             <!-- Challenge List Panel -->
             <div
