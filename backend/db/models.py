@@ -52,6 +52,7 @@ class CtfSession(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     name: Mapped[str] = mapped_column(String)
     team_id: Mapped[Optional[int]] = mapped_column(ForeignKey("teams.id"))
+    owner_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[Optional[datetime]] = mapped_column(DateTime, default=datetime.utcnow)
 
     team: Mapped[Optional["Team"]] = relationship(back_populates="sessions")

@@ -9,7 +9,8 @@ from sqlalchemy.future import select
 
 from .config import settings
 from .db.database import get_db
-from .db.models import User
+from .db.models import User, Team, CtfSession, Challenge, EventLog
+from sqlalchemy import or_, func, update
 
 
 # Password hashing utilities
@@ -124,7 +125,41 @@ async def seed_admin_user(db: AsyncSession):
 
 from fastapi import APIRouter
 from pydantic import BaseModel
-from .db.models import Team
+
+
+def session_scope_filter(user: User):
+    """SQLAlchemy condition selecting sessions visible to *user*.
+
+    A session is visible if the user owns it, or the user belongs to the
+    team the session is attached to.
+    """
+    conds = [CtfSession.owner_id == user.id]
+    if user.team_id is not None:
+        conds.append(CtfSession.team_id == user.team_id)
+    return or_(*conds)
+
+
+async def ensure_default_session(db: AsyncSession) -> CtfSession:
+    """Guarantee at least one session exists and attach orphan challenges to it.
+
+    Creates a session named 'Default' owned by the first admin if none exists,
+    then assigns any challenge with ``session_id IS NULL`` to it (a safe,
+    non-destructive startup migration so existing data isn't orphaned).
+    """
+    result = await db.execute(select(CtfSession).order_by(CtfSession.id.asc()).limit(1))
+    default = result.scalars().first()
+    if default is None:
+        admin = (await db.execute(select(User).where(User.role == "admin"))).scalars().first()
+        default = CtfSession(name="Default", owner_id=admin.id if admin else None)
+        db.add(default)
+        await db.commit()
+        await db.refresh(default)
+
+    await db.execute(
+        update(Challenge).where(Challenge.session_id.is_(None)).values(session_id=default.id)
+    )
+    await db.commit()
+    return default
 
 
 auth_router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -278,5 +313,147 @@ async def delete_team(
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
     await db.delete(team)
+    await db.commit()
+    return {"status": "ok"}
+
+
+# ---- Sessions (per-CTF dashboard) ----
+
+sessions_router = APIRouter(prefix="/api/sessions", tags=["sessions"])
+
+
+class SessionCreate(BaseModel):
+    name: str
+
+
+async def _challenge_count(db: AsyncSession, session_id: int) -> int:
+    result = await db.execute(
+        select(func.count(Challenge.id)).where(Challenge.session_id == session_id)
+    )
+    return int(result.scalar() or 0)
+
+
+def _is_session_visible(session: CtfSession, user: User) -> bool:
+    if session.owner_id == user.id:
+        return True
+    return user.team_id is not None and session.team_id == user.team_id
+
+
+@sessions_router.post("")
+async def create_session(
+    body: SessionCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    session = CtfSession(name=body.name, owner_id=current_user.id)
+    db.add(session)
+    await db.commit()
+    await db.refresh(session)
+    return {
+        "id": session.id,
+        "name": session.name,
+        "created_at": str(session.created_at) if session.created_at else None,
+        "challenge_count": 0,
+    }
+
+
+@sessions_router.get("")
+async def list_sessions(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(CtfSession)
+        .where(session_scope_filter(current_user))
+        .order_by(CtfSession.created_at.desc())
+    )
+    sessions = result.scalars().all()
+    out = []
+    for s in sessions:
+        out.append({
+            "id": s.id,
+            "name": s.name,
+            "created_at": str(s.created_at) if s.created_at else None,
+            "challenge_count": await _challenge_count(db, s.id),
+        })
+    return out
+
+
+@sessions_router.get("/{session_id}")
+async def get_session(
+    session_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    session = await db.get(CtfSession, session_id)
+    if not session or not _is_session_visible(session, current_user):
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    challenges = (
+        await db.execute(
+            select(Challenge)
+            .where(Challenge.session_id == session_id)
+            .order_by(Challenge.created_at.desc())
+        )
+    ).scalars().all()
+
+    history = (
+        await db.execute(
+            select(EventLog)
+            .join(Challenge, EventLog.challenge_id == Challenge.id)
+            .where(Challenge.session_id == session_id)
+            .order_by(EventLog.created_at.desc())
+            .limit(200)
+        )
+    ).scalars().all()
+
+    return {
+        "id": session.id,
+        "name": session.name,
+        "challenges": [
+            {
+                "id": c.id,
+                "title": c.title,
+                "category": c.category,
+                "status": (c.status.value if c.status is not None else None),
+            }
+            for c in challenges
+        ],
+        "history": [
+            {
+                "id": h.id,
+                "challenge_id": h.challenge_id,
+                "type": h.event_type.value if hasattr(h.event_type, "value") else str(h.event_type),
+                "content": h.content,
+                "created_at": str(h.created_at) if h.created_at else None,
+            }
+            for h in history
+        ],
+    }
+
+
+@sessions_router.delete("/{session_id}")
+async def delete_session(
+    session_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    session = await db.get(CtfSession, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Only the session owner can delete it")
+
+    # Move its challenges to the default/first session so the FK isn't violated.
+    default = (
+        await db.execute(select(CtfSession).order_by(CtfSession.id.asc()).limit(1))
+    ).scalars().first()
+    if default is not None and default.id != session_id:
+        await db.execute(
+            update(Challenge)
+            .where(Challenge.session_id == session_id)
+            .values(session_id=default.id)
+        )
+    await db.delete(session)
     await db.commit()
     return {"status": "ok"}

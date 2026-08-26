@@ -10,6 +10,12 @@
                 >
                     Challenges
                 </h2>
+                <div
+                    v-if="currentSession()"
+                    class="text-xs font-mono text-stone mb-3 -mt-2"
+                >
+                    Session: {{ currentSession().name }}
+                </div>
 
                 <div
                     v-if="challenges.length === 0"
@@ -157,6 +163,51 @@
                             Add Challenge
                         </button>
                     </form>
+                </div>
+
+                <!-- Session History -->
+                <div class="mt-6 pt-4 border-t border-sand/20">
+                    <div
+                        class="font-mono text-xs uppercase tracking-mono text-lavender mb-2"
+                    >
+                        SESSION HISTORY
+                    </div>
+                    <div
+                        v-if="!sessionHistory || (sessionHistory.challenges || []).length === 0"
+                        class="text-stone italic text-sm"
+                    >
+                        No challenges in this session yet.
+                    </div>
+                    <div v-else class="space-y-2">
+                        <div
+                            v-for="c in sessionHistory.challenges"
+                            :key="c.id"
+                            class="flex justify-between text-sm"
+                        >
+                            <span class="text-cream/80">{{ c.title }}</span>
+                            <span
+                                :class="statusClasses[c.status] || 'text-stone'"
+                                class="text-xs px-1.5 py-0.5 rounded-pill"
+                                >{{ c.status }}</span
+                            >
+                        </div>
+                        <div
+                            v-if="(sessionHistory.history || []).length > 0"
+                            class="border-t border-sand/20 pt-2 mt-2"
+                        >
+                            <div
+                                v-for="h in sessionHistory.history"
+                                :key="h.id"
+                                class="text-xs mb-1"
+                            >
+                                <span class="text-stone">[{{ h.type }}]</span>
+                                <span
+                                    class="text-cream/70 whitespace-pre-wrap"
+                                    >{{ h.content }}</span
+                                >
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -372,7 +423,8 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, onMounted, nextTick, watch } from 'vue'
+import { sessionState, loadSessions, currentSession } from '../store.js'
 
 const challenges = ref([])
 const CHALLENGE_CATEGORIES = [
@@ -421,10 +473,15 @@ const WS_BASE = 'ws://localhost:8000/api/ws'
 const models = ref([])
 const defaultModel = ref('')
 const modelChoice = ref('')
+const sessionHistory = ref(null)
 
 const fetchChallenges = async () => {
     try {
-        const res = await fetch(`${API_BASE}/challenges`)
+        const sid = sessionState.currentId
+        const url = sid
+            ? `${API_BASE}/challenges?session_id=${sid}`
+            : `${API_BASE}/challenges`
+        const res = await fetch(url)
         challenges.value = await res.json()
         // Update status of currently selected challenge if applicable
         if (selectedChallenge.value) {
@@ -435,6 +492,21 @@ const fetchChallenges = async () => {
         }
     } catch (e) {
         console.error('Failed to fetch challenges', e)
+    }
+}
+
+const loadHistory = async () => {
+    const sid = sessionState.currentId
+    if (!sid) {
+        sessionHistory.value = null
+        return
+    }
+    try {
+        const res = await fetch(`${API_BASE}/sessions/${sid}`)
+        if (!res.ok) return
+        sessionHistory.value = await res.json()
+    } catch (e) {
+        console.error('Failed to load history', e)
     }
 }
 
@@ -459,6 +531,9 @@ const createChallenge = async () => {
         fd.append('category', newChallenge.value.category)
         fd.append('description', newChallenge.value.description || '')
         fd.append('assigned_model', newChallenge.value.model || '')
+        if (sessionState.currentId) {
+            fd.append('session_id', String(sessionState.currentId))
+        }
         const createInput = createFileInput.value
         if (createInput && createInput.files && createInput.files.length > 0) {
             for (const f of createInput.files) {
@@ -665,12 +740,25 @@ const scrollToBottom = () => {
     })
 }
 
-onMounted(() => {
+onMounted(async () => {
+    await loadSessions()
     fetchChallenges()
     fetchModels()
+    loadHistory()
     // Poll challenges to update status (in real app, use SSE or WS for challenge list too)
     setInterval(fetchChallenges, 5000)
 })
+
+watch(
+    () => sessionState.currentId,
+    () => {
+        selectedChallenge.value = null
+        selectedChallengeFiles.value = []
+        logs.value = []
+        fetchChallenges()
+        loadHistory()
+    },
+)
 </script>
 
 <style>

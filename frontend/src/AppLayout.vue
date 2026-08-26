@@ -7,6 +7,34 @@
                 <img src="/favicon.svg" class="w-8 h-8" />
                 <span class="text-lg font-medium tracking-[0.02em]">Argus</span>
             </div>
+
+            <div class="mb-6 px-2">
+                <div class="font-mono text-xs uppercase tracking-mono text-mint mb-1">
+                    Session
+                </div>
+                <div class="flex space-x-2">
+                    <select
+                        v-model="sessionState.currentId"
+                        class="flex-1 bg-cocoa border border-sand/40 rounded p-2 text-cream text-sm min-w-0"
+                    >
+                        <option
+                            v-for="s in sessionState.sessions"
+                            :key="s.id"
+                            :value="s.id"
+                        >
+                            {{ s.name }}
+                        </option>
+                    </select>
+                    <button
+                        @click="newSession"
+                        class="border border-iris text-iris rounded-lg px-2 hover:bg-iris/10 transition"
+                        title="New Session"
+                    >
+                        +
+                    </button>
+                </div>
+            </div>
+
             <nav class="space-y-1 flex-1">
                 <router-link
                     to="/"
@@ -37,8 +65,19 @@
 </template>
 
 <script setup>
+import { onMounted } from "vue";
+import { sessionState, loadSessions, createSession } from "./store.js";
+
+async function newSession() {
+    const name = window.prompt("Session name (e.g. a CTF event):");
+    if (!name || !name.trim()) return;
+    await createSession(name.trim());
+}
+
 function logout() {
     localStorage.removeItem("argus_token");
     window.location.href = "/login";
 }
+
+onMounted(loadSessions);
 </script>

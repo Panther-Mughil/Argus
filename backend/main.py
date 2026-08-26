@@ -7,8 +7,16 @@ from sqlalchemy import text, delete
 from contextlib import asynccontextmanager
 
 from .db.database import engine, Base, get_db
-from .db.models import Challenge, ChallengeStatus, User
-from .auth import auth_router, teams_router, seed_admin_user, get_current_user
+from .db.models import Challenge, ChallengeStatus, User, CtfSession
+from .auth import (
+    auth_router,
+    teams_router,
+    sessions_router,
+    seed_admin_user,
+    ensure_default_session,
+    get_current_user,
+    session_scope_filter,
+)
 
 # Adds FLAG_PROPOSED to the native Postgres enum if the DB was created before
 # that value existed. Idempotent on Postgres 12+ (compose uses postgres:15).
@@ -69,6 +77,21 @@ async def lifespan(app: FastAPI):
             await seed_admin_user(session)
     except Exception as exc:
         print(f"Admin seed skipped: {exc}")
+
+    # Session owner column + default-session bootstrap (idempotent).
+    try:
+        async with engine.connect() as conn:
+            await conn.exec_driver_sql("ALTER TABLE ctf_sessions ADD COLUMN IF NOT EXISTS owner_id INTEGER")
+            await conn.commit()
+    except Exception as exc:
+        print(f"Session owner migration skipped: {exc}")
+
+    try:
+        from .db.database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            await ensure_default_session(session)
+    except Exception as exc:
+        print(f"Default session bootstrap skipped: {exc}")
     yield
 
 
@@ -90,6 +113,7 @@ app.add_middleware(
 
 app.include_router(auth_router)
 app.include_router(teams_router)
+app.include_router(sessions_router)
 
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -98,7 +122,7 @@ import os
 import json
 import asyncio
 from fastapi import WebSocket, WebSocketDisconnect, UploadFile, File
-from typing import Dict, List
+from typing import Dict, List, Optional
 from pydantic import BaseModel
 
 from .agent.loop import AgentLoop
@@ -180,8 +204,16 @@ async def health_check():
     return {"status": "ok", "message": "Argus Backend is running."}
 
 @app.get("/api/challenges")
-async def get_challenges(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Challenge))
+async def get_challenges(
+    session_id: Optional[int] = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    stmt = select(Challenge)
+    if session_id is not None:
+        stmt = stmt.where(Challenge.session_id == session_id)
+    # pi-lens-ignore: python-sql-injection — session_id is bound by SQLAlchemy as a query parameter.
+    result = await db.execute(stmt)
     challenges = result.scalars().all()
     return challenges
 
@@ -215,6 +247,7 @@ async def create_challenge(
     category: str = Form(...),
     description: str = Form(""),
     assigned_model: str = Form(""),
+    session_id: str = Form(""),
     files: List[UploadFile] = File([]),
     db: AsyncSession = Depends(get_db),
 ):
@@ -228,12 +261,41 @@ async def create_challenge(
         raise HTTPException(status_code=400, detail=f"Invalid category. Must be one of: {', '.join(sorted(CHALLENGE_CATEGORIES))}")
     if assigned_model and assigned_model not in known_model_ids():
         raise HTTPException(status_code=400, detail=f"Unknown model '{assigned_model}'")
+
+    # Resolve the owning session (validate access, else default to first visible).
+    if session_id:
+        try:
+            sid = int(session_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid session_id")
+        session = await db.get(CtfSession, sid)
+        if not session:
+            raise HTTPException(status_code=400, detail="Session not found")
+        if not (session.owner_id == current_user.id or (current_user.team_id is not None and session.team_id == current_user.team_id)):
+            raise HTTPException(status_code=403, detail="Not allowed to use this session")
+    else:
+        session = (
+            await db.execute(
+                select(CtfSession)
+                .where(session_scope_filter(current_user))
+                .order_by(CtfSession.id.asc())
+                .limit(1)
+            )
+        ).scalars().first()
+        if session is None:
+            session = CtfSession(name="Default", owner_id=current_user.id)
+            db.add(session)
+            await db.commit()
+            await db.refresh(session)
+    sid = session.id
+
     new_challenge = Challenge(
         title=title,
         description=description,
         category=category,
         status=ChallengeStatus.QUEUED,
         assigned_model=assigned_model or None,
+        session_id=sid,
     )
     db.add(new_challenge)
     await db.commit()
