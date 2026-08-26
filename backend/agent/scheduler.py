@@ -22,19 +22,40 @@ def _load_models_config() -> dict:
         ) from exc
 
 
-MODELS_CONFIG = _load_models_config()
+def _config() -> dict:
+    """Return a fresh copy of the registry (re-read the file each call).
 
-onyx_provider = next(p for p in MODELS_CONFIG["providers"] if p["name"] == "Onyx")
-DEFAULT_CONCURRENCY = onyx_provider.get("concurrency", 1)
+    Re-reading lets admin edits to models.json take effect immediately and
+    avoids the fragile ``next(...)`` import-time lookup when Onyx is removed.
+    """
+    return _load_models_config()
+
+
+def _as_int(value, default: int) -> int:
+    """Safely coerce a value to int; returns ``default`` on bad input."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _default_concurrency() -> int:
+    cfg = _config()
+    for provider in cfg.get("providers", []):
+        if provider.get("name") == "Onyx":
+            return _as_int(provider.get("concurrency"), 1)
+    for provider in cfg.get("providers", []):
+        return _as_int(provider.get("concurrency"), 1)
+    return 1
 
 
 def _concurrency_for(model: str) -> int:
     """Return the configured concurrency limit for a model, else the provider default."""
-    for provider in MODELS_CONFIG["providers"]:
+    for provider in _config().get("providers", []):
         for m in provider.get("models", []):
             if m.get("id") == model:
-                return provider.get("concurrency", DEFAULT_CONCURRENCY)
-    return DEFAULT_CONCURRENCY
+                return _as_int(provider.get("concurrency"), _default_concurrency())
+    return _default_concurrency()
 
 
 class ModelScheduler:

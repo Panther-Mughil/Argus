@@ -22,7 +22,8 @@ export async function loadSessions() {
     const data = await res.json();
     sessionState.sessions = data;
     const stillValid =
-      sessionState.currentId && data.some((s) => s.id === sessionState.currentId);
+      sessionState.currentId &&
+      data.some((s) => s.id === sessionState.currentId);
     if (!stillValid) {
       sessionState.currentId = data.length > 0 ? data[0].id : null;
     }

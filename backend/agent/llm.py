@@ -30,12 +30,18 @@ def _load_models_config() -> dict:
         ) from e
 
 
-MODELS_CONFIG = _load_models_config()
+def _config() -> dict:
+    """Return a fresh copy of the registry (re-read the file each call).
+
+    Re-reading on every query lets admin edits to models.json take effect
+    immediately without a restart.
+    """
+    return _load_models_config()
 
 
 def _provider_for_model(model: str) -> dict | None:
     """Return the provider dict that owns ``model``, or None if unknown."""
-    for provider in MODELS_CONFIG["providers"]:
+    for provider in _config()["providers"]:
         for m in provider.get("models") or []:
             if m.get("id") == model:
                 return provider
@@ -44,7 +50,7 @@ def _provider_for_model(model: str) -> dict | None:
 
 def default_model() -> str:
     """Return the first configured model id (used when no override is set)."""
-    for provider in MODELS_CONFIG["providers"]:
+    for provider in _config()["providers"]:
         for model in provider.get("models") or []:
             return model["id"]
     return "Qwen3.6-35B-A3B"
@@ -53,7 +59,7 @@ def default_model() -> str:
 def model_list() -> list[dict]:
     """Flatten the registry into rows the UI/API can render."""
     rows = []
-    for provider in MODELS_CONFIG["providers"]:
+    for provider in _config()["providers"]:
         for model in provider.get("models") or []:
             rows.append(
                 {

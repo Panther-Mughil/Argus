@@ -56,6 +56,12 @@ def list_hosts() -> list[dict]:
     return HOSTS_CONFIG.get("hosts", [])
 
 
+def reload() -> None:
+    """Re-read hosts.json into the in-memory config (after an admin edit)."""
+    global HOSTS_CONFIG
+    HOSTS_CONFIG = _load_hosts_config()
+
+
 def acquire_host(name: str) -> None:
     """Increment the active-use counter for *name*."""
     with _active_lock:

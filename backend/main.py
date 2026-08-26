@@ -19,6 +19,8 @@ from .auth import (
     session_scope_filter,
 )
 
+from .admin import admin_router
+
 # Adds FLAG_PROPOSED to the native Postgres enum if the DB was created before
 # that value existed. Idempotent on Postgres 12+ (compose uses postgres:15).
 _ENUM_MIGRATION_SQL = text(
@@ -125,6 +127,7 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(teams_router)
 app.include_router(sessions_router)
+app.include_router(admin_router)
 
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -665,6 +668,14 @@ async def websocket_endpoint(websocket: WebSocket, challenge_id: int):
                     agent.inject_intervention(data)
     except WebSocketDisconnect:
         manager.disconnect(websocket, challenge_id)
+
+
+@app.websocket("/api/ws/shell/{host_name}")
+async def shell_ws(websocket: WebSocket, host_name: str):
+    """Interactive SSH terminal into a configured container host."""
+    from worker.shell import handle_shell
+
+    await handle_shell(websocket, host_name)
 
 
 # Required for SPA history-mode routing: direct navigation or a refresh at a
