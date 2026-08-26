@@ -124,6 +124,8 @@ async def generate_chat_completion(
     headers = {}
     api_key = _get_api_key(provider)
     if api_key:
+        # pi-lens-ignore: no-secret-in-env-var-name — api_key is resolved from the
+        # provider registry / environment at runtime, not hardcoded here.
         headers["Authorization"] = f"Bearer {api_key}"
 
     payload = {

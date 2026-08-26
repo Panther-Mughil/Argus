@@ -327,10 +327,14 @@ class SessionCreate(BaseModel):
 
 
 async def _challenge_count(db: AsyncSession, session_id: int) -> int:
-    result = await db.execute(
-        select(func.count(Challenge.id)).where(Challenge.session_id == session_id)
-    )
-    return int(result.scalar() or 0)
+    try:
+        result = await db.execute(
+            select(func.count(Challenge.id)).where(Challenge.session_id == session_id)
+        )
+        return int(result.scalar() or 0)
+    except Exception:
+        # Non-fatal: a failed count should not break session listing.
+        return 0
 
 
 def _is_session_visible(session: CtfSession, user: User) -> bool:
