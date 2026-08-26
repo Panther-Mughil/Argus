@@ -33,11 +33,19 @@ from worker.sandbox import SandboxManager
 _prompts_path = os.path.join(os.path.dirname(__file__), "..", "prompts.json")
 _toolplaybook_path = os.path.join(os.path.dirname(__file__), "..", "toolplaybook.json")
 
-with open(_prompts_path, "r", encoding="utf-8") as _pf:
-    _PROMPTS = json.load(_pf)
+try:
+    with open(_prompts_path, "r", encoding="utf-8") as _pf:
+        _PROMPTS = json.load(_pf)
+except (OSError, json.JSONDecodeError) as _exc:
+    print(f"prompts.json load failed; using empty config: {_exc}")
+    _PROMPTS = {}
 
-with open(_toolplaybook_path, "r", encoding="utf-8") as _tf:
-    _TOOLPLAYBOOK = json.load(_tf)
+try:
+    with open(_toolplaybook_path, "r", encoding="utf-8") as _tf:
+        _TOOLPLAYBOOK = json.load(_tf)
+except (OSError, json.JSONDecodeError) as _exc:
+    print(f"toolplaybook.json load failed; using empty config: {_exc}")
+    _TOOLPLAYBOOK = {}
 
 CORE_PROMPT = _PROMPTS["core"]
 CATEGORY_PROMPTS = _PROMPTS["categories"]
