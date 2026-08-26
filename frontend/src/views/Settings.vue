@@ -1,5 +1,5 @@
 <template>
-    <div class="max-w-[1000px]">
+    <div class="w-full">
         <h2 class="text-xl font-light mb-4">Settings</h2>
 
         <!-- Teams (per-session) -->
