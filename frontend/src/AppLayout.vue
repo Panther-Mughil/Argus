@@ -76,7 +76,7 @@ async function newSession() {
 
 function logout() {
   localStorage.removeItem("argus_token");
-  window.location.href = "/login";
+  window.location.replace("/login");
 }
 
 onMounted(loadSessions);

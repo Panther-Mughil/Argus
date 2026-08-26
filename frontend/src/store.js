@@ -11,11 +11,20 @@ export const sessionState = reactive({
 export async function loadSessions() {
   try {
     const res = await fetch(`${API}/sessions`);
+    if (res.status === 401) {
+      // Token invalid/expired (e.g. server secret rotated) -> force re-login.
+      // replace() keeps the login URL on the same origin (avoids an open redirect).
+      localStorage.removeItem("argus_token");
+      window.location.replace("/login");
+      return;
+    }
     if (!res.ok) return;
     const data = await res.json();
     sessionState.sessions = data;
-    if (!sessionState.currentId && data.length > 0) {
-      sessionState.currentId = data[0].id;
+    const stillValid =
+      sessionState.currentId && data.some((s) => s.id === sessionState.currentId);
+    if (!stillValid) {
+      sessionState.currentId = data.length > 0 ? data[0].id : null;
     }
   } catch (e) {
     console.error("Failed to load sessions", e);
