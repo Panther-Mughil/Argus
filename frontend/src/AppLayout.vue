@@ -58,7 +58,7 @@
                 <router-link
                     to="/"
                     class="flex items-center py-2 rounded-lg hover:bg-aubergine/60 transition"
-                    active-class="bg-aubergine"
+                    exact-active-class="bg-aubergine"
                     :class="collapsed ? 'justify-center' : 'justify-start space-x-3 px-3'"
                     :title="collapsed ? 'Main Dashboard' : ''"
                 >
@@ -79,7 +79,7 @@
                 <router-link
                     to="/settings"
                     class="flex items-center py-2 rounded-lg hover:bg-aubergine/60 transition"
-                    active-class="bg-aubergine"
+                    exact-active-class="bg-aubergine"
                     :class="collapsed ? 'justify-center' : 'justify-start space-x-3 px-3'"
                     :title="collapsed ? 'Settings' : ''"
                 >

@@ -647,10 +647,19 @@ async function saveProvider() {
     const url = editingProvider.value
         ? `${API}/admin/models/providers/${editingProvider.value}`
         : `${API}/admin/models/providers`;
+    // When editing, carry over the provider's existing models so an edit that
+    // does not touch them never wipes them out.
+    const payload = { ...providerForm };
+    if (editingProvider.value) {
+        const existing = providers.value.find(
+            (p) => p.name === editingProvider.value,
+        );
+        if (existing) payload.models = existing.models || [];
+    }
     const r = await fetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(providerForm),
+        body: JSON.stringify(payload),
     });
     if (r.ok) {
         showProviderForm.value = false;

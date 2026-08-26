@@ -9,17 +9,16 @@ effect immediately without a restart.
 
 import json
 from pathlib import Path
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from backend.config import settings
-from .auth import admin_required
-from .db.database import get_db
-from .db.models import User
-from .agent import llm
 from worker import host_registry
+
+from .agent import llm
+from .auth import admin_required
+from .db.models import User
 
 admin_router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -126,8 +125,8 @@ async def delete_host(name: str, _admin: User = Depends(admin_required)):
 
 class ModelIn(BaseModel):
     id: str
-    display_name: Optional[str] = None
-    ctx: Optional[int] = None
+    display_name: str | None = None
+    ctx: int | None = None
     free: bool = False
     notes: str = ""
 
@@ -136,8 +135,8 @@ class ProviderIn(BaseModel):
     name: str
     api_type: str = "openai-completions"
     base_url: str = ""
-    api_key: Optional[str] = None
-    api_key_env: Optional[str] = None
+    api_key: str | None = None
+    api_key_env: str | None = None
     concurrency: int = 1
     models: list[ModelIn] = Field(default_factory=list)
 
@@ -173,7 +172,12 @@ async def update_provider(
     providers = data.setdefault("providers", [])
     for i, p in enumerate(providers):
         if p.get("name") == name:
-            providers[i] = body.model_dump()
+            new = body.model_dump()
+            # Preserve existing models when the submitted body omits them
+            # (the UI edit form does not send the models array).
+            if not new.get("models"):
+                new["models"] = p.get("models", [])
+            providers[i] = new
             _write_json(_MODELS_PATH, data)
             return {"status": "ok", "providers": providers}
     raise HTTPException(status_code=404, detail=f"Provider '{name}' not found")
