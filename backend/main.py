@@ -665,3 +665,31 @@ async def websocket_endpoint(websocket: WebSocket, challenge_id: int):
                     agent.inject_intervention(data)
     except WebSocketDisconnect:
         manager.disconnect(websocket, challenge_id)
+
+
+# Required for SPA history-mode routing: direct navigation or a refresh at a
+# client route (e.g. /settings, /login) hits the backend, which must return the
+# built index.html so vue-router can take over. API/asset paths are handled by
+# more specific routes and must NOT fall through to the SPA.
+@app.get("/favicon.ico")
+async def serve_favicon_ico():
+    try:
+        return HTMLResponse(
+            content=(FRONTEND_DIR / "favicon.svg").read_text(encoding="utf-8"),
+            media_type="image/svg+xml",
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail="favicon not found") from e
+
+
+@app.get("/{path:path}")
+async def serve_spa(path: str):
+    if path.startswith(("api/", "assets/")):
+        raise HTTPException(status_code=404, detail="Not found")
+    built_index = FRONTEND_DIST / "index.html"
+    source_index = FRONTEND_DIR / "index.html"
+    if built_index.exists():
+        return HTMLResponse(content=built_index.read_text(encoding="utf-8"))
+    if source_index.exists():
+        return HTMLResponse(content=source_index.read_text(encoding="utf-8"))
+    raise HTTPException(status_code=404, detail="index.html not found")

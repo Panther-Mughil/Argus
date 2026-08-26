@@ -56,7 +56,7 @@ class Settings(BaseSettings):
     )
 
     # JWT Configuration
-    ARGUS_JWT_SECRET: str = "dev-secret-key"
+    ARGUS_JWT_SECRET: str = "dev-insecure-secret-change-me-0123456789abcdef"
     ARGUS_JWT_EXPIRES_MINUTES: int = 1440
 
     # Admin User Configuration
