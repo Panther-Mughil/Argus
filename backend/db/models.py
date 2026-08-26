@@ -2,6 +2,7 @@
 
 Typed with SQLAlchemy 2.0 ``Mapped``/``mapped_column`` annotations.
 """
+
 import enum
 from datetime import datetime
 from typing import List, Optional
@@ -12,6 +13,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
 
+
 class ChallengeStatus(str, enum.Enum):
     QUEUED = "QUEUED"
     IN_PROGRESS = "IN_PROGRESS"
@@ -21,12 +23,14 @@ class ChallengeStatus(str, enum.Enum):
     # Agent has proposed a flag and is paused, awaiting human verification.
     FLAG_PROPOSED = "FLAG_PROPOSED"
 
+
 class EventType(str, enum.Enum):
     PLAN = "PLAN"
     ACTION = "ACTION"
     OBSERVATION = "OBSERVATION"
     HYPOTHESIS = "HYPOTHESIS"
     SYSTEM = "SYSTEM"
+
 
 class Team(Base):
     __tablename__ = "teams"
@@ -35,6 +39,7 @@ class Team(Base):
 
     users: Mapped[List["User"]] = relationship(back_populates="team")
     sessions: Mapped[List["CtfSession"]] = relationship(back_populates="team")
+
 
 class User(Base):
     __tablename__ = "users"
@@ -47,16 +52,22 @@ class User(Base):
 
     team: Mapped[Optional["Team"]] = relationship(back_populates="users")
 
+
 class CtfSession(Base):
     __tablename__ = "ctf_sessions"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     name: Mapped[str] = mapped_column(String)
     team_id: Mapped[Optional[int]] = mapped_column(ForeignKey("teams.id"))
-    owner_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
-    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime, default=datetime.utcnow)
+    owner_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
+    created_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, default=datetime.utcnow
+    )
 
     team: Mapped[Optional["Team"]] = relationship(back_populates="sessions")
     challenges: Mapped[List["Challenge"]] = relationship(back_populates="session")
+
 
 class Challenge(Base):
     __tablename__ = "challenges"
@@ -65,15 +76,24 @@ class Challenge(Base):
     title: Mapped[str] = mapped_column(String)
     description: Mapped[Optional[str]] = mapped_column(Text)
     category: Mapped[Optional[str]] = mapped_column(String)  # web, pwn, crypto, etc.
-    target_urls: Mapped[Optional[list]] = mapped_column(JSON, default=list)  # List of allowed URLs
-    status: Mapped[Optional[ChallengeStatus]] = mapped_column(Enum(ChallengeStatus), default=ChallengeStatus.QUEUED)
+    target_urls: Mapped[Optional[list]] = mapped_column(
+        JSON, default=list
+    )  # List of allowed URLs
+    status: Mapped[Optional[ChallengeStatus]] = mapped_column(
+        Enum(ChallengeStatus), default=ChallengeStatus.QUEUED
+    )
     assigned_model: Mapped[Optional[str]] = mapped_column(String)
     flag: Mapped[Optional[str]] = mapped_column(String)
-    proposed_flag: Mapped[Optional[str]] = mapped_column(String)  # last flag the agent proposed
-    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime, default=datetime.utcnow)
+    proposed_flag: Mapped[Optional[str]] = mapped_column(
+        String
+    )  # last flag the agent proposed
+    created_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, default=datetime.utcnow
+    )
 
     session: Mapped[Optional["CtfSession"]] = relationship(back_populates="challenges")
     events: Mapped[List["EventLog"]] = relationship(back_populates="challenge")
+
 
 class EventLog(Base):
     __tablename__ = "event_logs"
@@ -82,6 +102,8 @@ class EventLog(Base):
     event_type: Mapped[EventType] = mapped_column(Enum(EventType))
     content: Mapped[str] = mapped_column(Text)
     tool_name: Mapped[Optional[str]] = mapped_column(String)  # If it's a tool action
-    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, default=datetime.utcnow
+    )
 
     challenge: Mapped[Optional["Challenge"]] = relationship(back_populates="events")

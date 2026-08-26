@@ -17,11 +17,14 @@ from sqlalchemy import or_, func, update
 def hash_password(password: str) -> str:
     """Hash a password for storing."""
     salt = bcrypt.gensalt()
-    return bcrypt.hashpw(password.encode('utf-8'), salt).decode('utf-8')
+    return bcrypt.hashpw(password.encode("utf-8"), salt).decode("utf-8")
+
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify a stored password against one provided by user."""
-    return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
+    return bcrypt.checkpw(
+        plain_password.encode("utf-8"), hashed_password.encode("utf-8")
+    )
 
 
 # JWT utilities
@@ -31,10 +34,13 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     if expires_delta:
         expire = datetime.utcnow() + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(minutes=settings.ARGUS_JWT_EXPIRES_MINUTES)
+        expire = datetime.utcnow() + timedelta(
+            minutes=settings.ARGUS_JWT_EXPIRES_MINUTES
+        )
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, settings.ARGUS_JWT_SECRET, algorithm="HS256")
     return encoded_jwt
+
 
 def decode_token(token: str):
     """Decode a JWT token."""
@@ -58,9 +64,9 @@ def decode_token(token: str):
 # FastAPI dependencies
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/login")
 
+
 async def get_current_user(
-    token: str = Depends(oauth2_scheme),
-    db: AsyncSession = Depends(get_db)
+    token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)
 ):
     """Get the current user from the JWT token."""
     payload = decode_token(token)
@@ -71,7 +77,7 @@ async def get_current_user(
             detail="Invalid authentication credentials",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
     result = await db.execute(select(User).where(User.username == username))
     user = result.scalars().first()
     if user is None:
@@ -82,17 +88,15 @@ async def get_current_user(
         )
     return user
 
-def get_current_active_user(
-    current_user: User = Depends(get_current_user)
-):
+
+def get_current_active_user(current_user: User = Depends(get_current_user)):
     """Get the current active user."""
     if not current_user:
         raise HTTPException(status_code=400, detail="Inactive user")
     return current_user
 
-def admin_required(
-    current_user: User = Depends(get_current_active_user)
-):
+
+def admin_required(current_user: User = Depends(get_current_active_user)):
     """Dependency to check if the current user is an admin."""
     if current_user.role != "admin":
         raise HTTPException(
@@ -101,11 +105,14 @@ def admin_required(
         )
     return current_user
 
+
 async def seed_admin_user(db: AsyncSession):
     """Seed the default admin user if it doesn't exist."""
-    result = await db.execute(select(User).where(User.username == settings.ARGUS_ADMIN_USERNAME))
+    result = await db.execute(
+        select(User).where(User.username == settings.ARGUS_ADMIN_USERNAME)
+    )
     admin_user = result.scalars().first()
-    
+
     if not admin_user:
         hashed_password = hash_password(settings.ARGUS_ADMIN_PASSWORD)
         admin_user = User(
@@ -149,14 +156,20 @@ async def ensure_default_session(db: AsyncSession) -> CtfSession:
     result = await db.execute(select(CtfSession).order_by(CtfSession.id.asc()).limit(1))
     default = result.scalars().first()
     if default is None:
-        admin = (await db.execute(select(User).where(User.role == "admin"))).scalars().first()
+        admin = (
+            (await db.execute(select(User).where(User.role == "admin")))
+            .scalars()
+            .first()
+        )
         default = CtfSession(name="Default", owner_id=admin.id if admin else None)
         db.add(default)
         await db.commit()
         await db.refresh(default)
 
     await db.execute(
-        update(Challenge).where(Challenge.session_id.is_(None)).values(session_id=default.id)
+        update(Challenge)
+        .where(Challenge.session_id.is_(None))
+        .values(session_id=default.id)
     )
     await db.commit()
     return default
@@ -179,7 +192,11 @@ class ChangePasswordRequest(BaseModel):
 async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.username == body.username))
     user = result.scalars().first()
-    if not user or not user.password_hash or not verify_password(body.password, user.password_hash):
+    if (
+        not user
+        or not user.password_hash
+        or not verify_password(body.password, user.password_hash)
+    ):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     token = create_access_token({"sub": user.username, "role": user.role})
     return {
@@ -209,7 +226,9 @@ async def change_password(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    if not current_user.password_hash or not verify_password(body.old_password, current_user.password_hash):
+    if not current_user.password_hash or not verify_password(
+        body.old_password, current_user.password_hash
+    ):
         raise HTTPException(status_code=400, detail="Old password is incorrect")
     current_user.password_hash = hash_password(body.new_password)
     await db.commit()
@@ -261,7 +280,9 @@ async def get_team(
     team = await db.get(Team, team_id)
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
-    members = [{"id": u.id, "username": u.username, "email": u.email} for u in team.users]
+    members = [
+        {"id": u.id, "username": u.username, "email": u.email} for u in team.users
+    ]
     return {"id": team.id, "name": team.name, "members": members}
 
 
@@ -279,13 +300,18 @@ async def add_member(
     user = result.scalars().first()
     if not user:
         username = body.email.split("@")[0] or "user"
-        user = User(username=username, email=body.email, password_hash=None, role="user")
+        user = User(
+            username=username, email=body.email, password_hash=None, role="user"
+        )
         db.add(user)
         await db.commit()
         await db.refresh(user)
     user.team_id = team.id
     await db.commit()
-    return {"status": "ok", "user": {"id": user.id, "username": user.username, "email": user.email}}
+    return {
+        "status": "ok",
+        "user": {"id": user.id, "username": user.username, "email": user.email},
+    }
 
 
 @teams_router.delete("/{team_id}/members/{user_id}")
@@ -374,12 +400,14 @@ async def list_sessions(
     sessions = result.scalars().all()
     out = []
     for s in sessions:
-        out.append({
-            "id": s.id,
-            "name": s.name,
-            "created_at": str(s.created_at) if s.created_at else None,
-            "challenge_count": await _challenge_count(db, s.id),
-        })
+        out.append(
+            {
+                "id": s.id,
+                "name": s.name,
+                "created_at": str(s.created_at) if s.created_at else None,
+                "challenge_count": await _challenge_count(db, s.id),
+            }
+        )
     return out
 
 
@@ -394,22 +422,30 @@ async def get_session(
         raise HTTPException(status_code=404, detail="Session not found")
 
     challenges = (
-        await db.execute(
-            select(Challenge)
-            .where(Challenge.session_id == session_id)
-            .order_by(Challenge.created_at.desc())
+        (
+            await db.execute(
+                select(Challenge)
+                .where(Challenge.session_id == session_id)
+                .order_by(Challenge.created_at.desc())
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     history = (
-        await db.execute(
-            select(EventLog)
-            .join(Challenge, EventLog.challenge_id == Challenge.id)
-            .where(Challenge.session_id == session_id)
-            .order_by(EventLog.created_at.desc())
-            .limit(200)
+        (
+            await db.execute(
+                select(EventLog)
+                .join(Challenge, EventLog.challenge_id == Challenge.id)
+                .where(Challenge.session_id == session_id)
+                .order_by(EventLog.created_at.desc())
+                .limit(200)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     return {
         "id": session.id,
@@ -427,7 +463,9 @@ async def get_session(
             {
                 "id": h.id,
                 "challenge_id": h.challenge_id,
-                "type": h.event_type.value if hasattr(h.event_type, "value") else str(h.event_type),
+                "type": h.event_type.value
+                if hasattr(h.event_type, "value")
+                else str(h.event_type),
                 "content": h.content,
                 "created_at": str(h.created_at) if h.created_at else None,
             }
@@ -446,12 +484,16 @@ async def delete_session(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     if session.owner_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Only the session owner can delete it")
+        raise HTTPException(
+            status_code=403, detail="Only the session owner can delete it"
+        )
 
     # Move its challenges to the default/first session so the FK isn't violated.
     default = (
-        await db.execute(select(CtfSession).order_by(CtfSession.id.asc()).limit(1))
-    ).scalars().first()
+        (await db.execute(select(CtfSession).order_by(CtfSession.id.asc()).limit(1)))
+        .scalars()
+        .first()
+    )
     if default is not None and default.id != session_id:
         await db.execute(
             update(Challenge)

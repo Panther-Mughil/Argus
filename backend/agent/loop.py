@@ -56,7 +56,14 @@ TOOLCHECK = _TOOLPLAYBOOK["toolcheck"]
 CATEGORY_TOOLS = _TOOLPLAYBOOK["category_tools"]
 
 
-def build_system_prompt(title: str, desc: str, category: str, goal: str | None = None, file_info: str | None = None, challenge_id: int | None = None) -> str:
+def build_system_prompt(
+    title: str,
+    desc: str,
+    category: str,
+    goal: str | None = None,
+    file_info: str | None = None,
+    challenge_id: int | None = None,
+) -> str:
     """Build a layered system prompt with role/scope, environment, challenge, workspace contract, loop discipline, category playbook, and submit rule.
 
     Parameters
@@ -103,7 +110,9 @@ def build_system_prompt(title: str, desc: str, category: str, goal: str | None =
     if goal:
         parts.append(
             "PROMPT GOAL / expected answer shape: " + goal + "\n"
-            "The flag is expected to look like '" + goal + "'. Search for something matching this shape "
+            "The flag is expected to look like '"
+            + goal
+            + "'. Search for something matching this shape "
             "(for example a person's name), NOT for the literal word 'flag' or 'ctf'. "
             "Inspect metadata (exiftool), embedded documents/images, filenames, and account/user records."
         )
@@ -154,7 +163,10 @@ def _to_int(value, default: int) -> int:
 # Path containment helpers (REQ-003)
 # ============================================================
 
-def _resolve_remote_path(raw: str, challenge_id: int, write: bool = False) -> str | None:
+
+def _resolve_remote_path(
+    raw: str, challenge_id: int, write: bool = False
+) -> str | None:
     """Resolve and validate a remote path against workspace containment rules.
 
     Parameters
@@ -202,7 +214,15 @@ def _protected_write_message(resolved_path: str, challenge_id: int) -> str:
 
 
 class AgentLoop:
-    def __init__(self, challenge_id: int, websocket_manager, challenge_title: str, challenge_desc: str, category: str = "", model: str = ""):
+    def __init__(
+        self,
+        challenge_id: int,
+        websocket_manager,
+        challenge_title: str,
+        challenge_desc: str,
+        category: str = "",
+        model: str = "",
+    ):
         self.challenge_id = challenge_id
         self.websocket_manager = websocket_manager
         self.running = False
@@ -224,7 +244,16 @@ class AgentLoop:
 
         # Build initial system prompt (file info added later by _push_challenge_files).
         self.messages = [
-            {"role": "system", "content": build_system_prompt(challenge_title, challenge_desc, category, self._goal, challenge_id=self.challenge_id)}
+            {
+                "role": "system",
+                "content": build_system_prompt(
+                    challenge_title,
+                    challenge_desc,
+                    category,
+                    self._goal,
+                    challenge_id=self.challenge_id,
+                ),
+            }
         ]
         self.iteration = 0
         self.started_at: float | None = None
@@ -233,7 +262,13 @@ class AgentLoop:
     # Event emission + persistence
     # ------------------------------------------------------------------
 
-    async def _emit(self, event_type: str, content: str, color: str = "text-cream", tool_name: str | None = None):
+    async def _emit(
+        self,
+        event_type: str,
+        content: str,
+        color: str = "text-cream",
+        tool_name: str | None = None,
+    ):
         timestamp = datetime.utcnow().strftime("%H:%M:%S")
         message = {
             "type": event_type,
@@ -244,13 +279,17 @@ class AgentLoop:
         await self.websocket_manager.broadcast_to_challenge(self.challenge_id, message)
         await self._persist_event(event_type, content, tool_name)
 
-    async def _persist_event(self, event_type: str, content: str, tool_name: str | None = None):
+    async def _persist_event(
+        self, event_type: str, content: str, tool_name: str | None = None
+    ):
         """Best-effort write to EventLog (never breaks the loop on DB errors)."""
         try:
             from ..db.database import AsyncSessionLocal
             from ..db.models import EventLog, EventType
 
-            mapped = event_type if event_type in {e.value for e in EventType} else "SYSTEM"
+            mapped = (
+                event_type if event_type in {e.value for e in EventType} else "SYSTEM"
+            )
             async with AsyncSessionLocal() as session:
                 session.add(
                     EventLog(
@@ -271,7 +310,9 @@ class AgentLoop:
     async def _file_type(self, remote_path: str) -> str | None:
         try:
             result = await asyncio.to_thread(
-                self.sandbox.execute_command, "kali-forensics", f"file -b {shlex.quote(remote_path)}"
+                self.sandbox.execute_command,
+                "kali-forensics",
+                f"file -b {shlex.quote(remote_path)}",
             )
             out = (result.get("output") or "").strip()
             return out or None
@@ -290,7 +331,9 @@ class AgentLoop:
         if not cmd:
             return None
         try:
-            result = await asyncio.to_thread(self.sandbox.execute_command, "kali-forensics", cmd)
+            result = await asyncio.to_thread(
+                self.sandbox.execute_command, "kali-forensics", cmd
+            )
             out = (result.get("output") or "").strip()
             return truncate(out, 1000) if out else None
         except Exception:
@@ -303,7 +346,9 @@ class AgentLoop:
             return
 
         sandbox_root = settings.ARGUS_SANDBOX_ROOT
-        originals_dir = f"{sandbox_root}/{self.challenge_id}/{settings.ARGUS_ORIGINALS_DIR}"
+        originals_dir = (
+            f"{sandbox_root}/{self.challenge_id}/{settings.ARGUS_ORIGINALS_DIR}"
+        )
         work_dir = f"{sandbox_root}/{self.challenge_id}/{settings.ARGUS_WORK_DIR}"
 
         uploaded: list[tuple[str, int]] = []
@@ -350,21 +395,32 @@ class AgentLoop:
             f"Copy files from there to {work_dir}/ before editing."
         )
         await self._emit(
-            "SYSTEM", f"Loaded {len(uploaded)} challenge file(s) into sandbox (originals/ + work/).", "text-mint"
+            "SYSTEM",
+            f"Loaded {len(uploaded)} challenge file(s) into sandbox (originals/ + work/).",
+            "text-mint",
         )
 
     async def _inject_tool_inventory(self) -> None:
         """Probe which forensic tools exist and tell the agent so it only uses real ones."""
         try:
-            result = await asyncio.to_thread(self.sandbox.execute_command, "kali-forensics", TOOLCHECK)
-            lines = [l.strip() for l in (result.get("output") or "").splitlines() if l.strip()]
+            result = await asyncio.to_thread(
+                self.sandbox.execute_command, "kali-forensics", TOOLCHECK
+            )
+            lines = [
+                l.strip()
+                for l in (result.get("output") or "").splitlines()
+                if l.strip()
+            ]
             if not lines:
                 return
             present = [l.split(maxsplit=1)[1] for l in lines if l.startswith("YES")]
             absent = [l.split(maxsplit=1)[1] for l in lines if l.startswith("NO")]
             self.messages[0]["content"] += (
-                "\nTools available in this sandbox (verified present): " + ", ".join(present) + "\n"
-                "Tools NOT installed (do not recommend or try to use): " + ", ".join(absent)
+                "\nTools available in this sandbox (verified present): "
+                + ", ".join(present)
+                + "\n"
+                "Tools NOT installed (do not recommend or try to use): "
+                + ", ".join(absent)
             )
         except Exception as exc:
             print(f"Tool inventory probe failed: {exc}")
@@ -396,7 +452,9 @@ class AgentLoop:
         # Restore-on-missing: if a file was not found, suggest copying from originals.
         if "No such file or directory" in combined:
             sandbox_root = settings.ARGUS_SANDBOX_ROOT
-            originals_dir = f"{sandbox_root}/{self.challenge_id}/{settings.ARGUS_ORIGINALS_DIR}"
+            originals_dir = (
+                f"{sandbox_root}/{self.challenge_id}/{settings.ARGUS_ORIGINALS_DIR}"
+            )
             work_dir = f"{sandbox_root}/{self.challenge_id}/{settings.ARGUS_WORK_DIR}"
             return (
                 f"A file you referenced was not found (the platform will restore the protected original automatically). "
@@ -452,7 +510,9 @@ class AgentLoop:
     # ------------------------------------------------------------------
 
     async def _run_sandbox(self, cmd: str) -> dict:
-        return await asyncio.to_thread(self.sandbox.execute_command, "kali-forensics", cmd)
+        return await asyncio.to_thread(
+            self.sandbox.execute_command, "kali-forensics", cmd
+        )
 
     async def _sync_originals(self) -> None:
         """Verify the protected originals/ dir matches the host artifacts and heal it.
@@ -467,7 +527,9 @@ class AgentLoop:
         if not files:
             return
         sandbox_root = settings.ARGUS_SANDBOX_ROOT
-        originals_dir = f"{sandbox_root}/{self.challenge_id}/{settings.ARGUS_ORIGINALS_DIR}"
+        originals_dir = (
+            f"{sandbox_root}/{self.challenge_id}/{settings.ARGUS_ORIGINALS_DIR}"
+        )
         work_dir = f"{sandbox_root}/{self.challenge_id}/{settings.ARGUS_WORK_DIR}"
         expected = {name: size for name, size in files}
 
@@ -488,7 +550,7 @@ class AgentLoop:
             if not line:
                 continue
             if line.startswith("MISSING "):
-                seen[line[len("MISSING "):]] = None
+                seen[line[len("MISSING ") :]] = None
             else:
                 try:
                     path, sz = line.rsplit(" ", 1)
@@ -502,10 +564,14 @@ class AgentLoop:
             if cur is None or cur != host_size:
                 try:
                     await asyncio.to_thread(
-                        self.sandbox.upload_file, str(challenge_dir(self.challenge_id) / name), originals_dir
+                        self.sandbox.upload_file,
+                        str(challenge_dir(self.challenge_id) / name),
+                        originals_dir,
                     )
                     restored.append(name)
-                    await self._emit("SYSTEM", f"Restored protected evidence '{name}'.", "text-mint")
+                    await self._emit(
+                        "SYSTEM", f"Restored protected evidence '{name}'.", "text-mint"
+                    )
                 except Exception as exc:
                     print(f"Failed to restore original '{name}': {exc}")
 
@@ -532,18 +598,29 @@ class AgentLoop:
             except Exception as exc:
                 print(f"Merge restored files into work/ failed: {exc}")
 
-    async def _handle_tool_call(self, tool_call_id: str, fn_name: str, fn_args: dict) -> str | None:
+    async def _handle_tool_call(
+        self, tool_call_id: str, fn_name: str, fn_args: dict
+    ) -> str | None:
         sandbox_root = settings.ARGUS_SANDBOX_ROOT
 
         if fn_name == "execute_command":
             cmd = fn_args.get("command", "")
             work_dir = f"{sandbox_root}/{self.challenge_id}/{settings.ARGUS_WORK_DIR}"
-            await self._emit("ACTION", f"$ {cmd}", "text-sand", tool_name="execute_command")
+            await self._emit(
+                "ACTION", f"$ {cmd}", "text-sand", tool_name="execute_command"
+            )
             # Run inside the challenge work dir so extracted files land where the model expects.
             result = await self._run_sandbox(f"cd {shlex.quote(work_dir)} && ( {cmd} )")
             content = self._format_command_result(result)
-            await self._emit("OBSERVATION", content if content.strip() else "[No output]", "text-stone", tool_name="execute_command")
-            self.messages.append({"role": "tool", "tool_call_id": tool_call_id, "content": content})
+            await self._emit(
+                "OBSERVATION",
+                content if content.strip() else "[No output]",
+                "text-stone",
+                tool_name="execute_command",
+            )
+            self.messages.append(
+                {"role": "tool", "tool_call_id": tool_call_id, "content": content}
+            )
             nudge = self._assess_and_nudge(cmd, result)
             # A destructive command may have damaged the protected originals; heal from host if so.
             await self._sync_originals()
@@ -559,22 +636,43 @@ class AgentLoop:
                     f"You may only read files under /workspace/{self.challenge_id}/. "
                     f"Focus on the files in your challenge."
                 )
-                await self._emit("ACTION", f"read_file {path} [REJECTED]", "text-danger", tool_name="read_file")
-                await self._emit("OBSERVATION", msg, "text-danger", tool_name="read_file")
-                self.messages.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call_id,
-                    "content": msg,
-                })
+                await self._emit(
+                    "ACTION",
+                    f"read_file {path} [REJECTED]",
+                    "text-danger",
+                    tool_name="read_file",
+                )
+                await self._emit(
+                    "OBSERVATION", msg, "text-danger", tool_name="read_file"
+                )
+                self.messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call_id,
+                        "content": msg,
+                    }
+                )
                 return msg
             offset = _to_int(fn_args.get("offset"), 0)
             limit = _to_int(fn_args.get("limit"), settings.ARGUS_MAX_TOOL_OUTPUT_CHARS)
             cmd = f"dd if={shlex.quote(resolved)} bs=1 skip={offset} count={limit} 2>/dev/null"
-            await self._emit("ACTION", f"read_file {resolved} [{offset}:{offset + limit}]", "text-sand", tool_name="read_file")
+            await self._emit(
+                "ACTION",
+                f"read_file {resolved} [{offset}:{offset + limit}]",
+                "text-sand",
+                tool_name="read_file",
+            )
             result = await self._run_sandbox(cmd)
             content = self._format_command_result(result)
-            await self._emit("OBSERVATION", content if content.strip() else "[No output]", "text-stone", tool_name="read_file")
-            self.messages.append({"role": "tool", "tool_call_id": tool_call_id, "content": content})
+            await self._emit(
+                "OBSERVATION",
+                content if content.strip() else "[No output]",
+                "text-stone",
+                tool_name="read_file",
+            )
+            self.messages.append(
+                {"role": "tool", "tool_call_id": tool_call_id, "content": content}
+            )
 
         elif fn_name == "write_file":
             path = fn_args.get("path", "")
@@ -582,13 +680,22 @@ class AgentLoop:
             resolved = _resolve_remote_path(path, self.challenge_id, write=True)
             if resolved is None:
                 msg = _protected_write_message(path, self.challenge_id)
-                await self._emit("ACTION", f"write_file {path} [REJECTED]", "text-danger", tool_name="write_file")
-                await self._emit("OBSERVATION", msg, "text-danger", tool_name="write_file")
-                self.messages.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call_id,
-                    "content": msg,
-                })
+                await self._emit(
+                    "ACTION",
+                    f"write_file {path} [REJECTED]",
+                    "text-danger",
+                    tool_name="write_file",
+                )
+                await self._emit(
+                    "OBSERVATION", msg, "text-danger", tool_name="write_file"
+                )
+                self.messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call_id,
+                        "content": msg,
+                    }
+                )
                 return msg
             raw = fn_args.get("content", "")
             if not raw.strip():
@@ -597,20 +704,42 @@ class AgentLoop:
                     "To extract a file, use execute_command: `tar xzf <archive>`, `7z x <archive>`, or `binwalk -e --run-as=root <img>`. "
                     "If you truly need an empty file, use execute_command: `touch <path>`."
                 )
-                await self._emit("ACTION", f"write_file {resolved} [REJECTED]", "text-danger", tool_name="write_file")
-                await self._emit("OBSERVATION", msg, "text-danger", tool_name="write_file")
-                self.messages.append({"role": "tool", "tool_call_id": tool_call_id, "content": msg})
+                await self._emit(
+                    "ACTION",
+                    f"write_file {resolved} [REJECTED]",
+                    "text-danger",
+                    tool_name="write_file",
+                )
+                await self._emit(
+                    "OBSERVATION", msg, "text-danger", tool_name="write_file"
+                )
+                self.messages.append(
+                    {"role": "tool", "tool_call_id": tool_call_id, "content": msg}
+                )
                 return msg
             b64 = base64.b64encode(raw.encode("utf-8")).decode("ascii")
             cmd = (
-                f"mkdir -p \"$(dirname {shlex.quote(resolved)})\" && "
+                f'mkdir -p "$(dirname {shlex.quote(resolved)})" && '
                 f"printf '%s' '{b64}' | base64 -d > {shlex.quote(resolved)}"
             )
-            await self._emit("ACTION", f"write_file {resolved}", "text-sand", tool_name="write_file")
+            await self._emit(
+                "ACTION", f"write_file {resolved}", "text-sand", tool_name="write_file"
+            )
             result = await self._run_sandbox(cmd)
             content = self._format_command_result(result)
-            await self._emit("OBSERVATION", content if content.strip() else "[written]", "text-stone", tool_name="write_file")
-            self.messages.append({"role": "tool", "tool_call_id": tool_call_id, "content": content or "File written."})
+            await self._emit(
+                "OBSERVATION",
+                content if content.strip() else "[written]",
+                "text-stone",
+                tool_name="write_file",
+            )
+            self.messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tool_call_id,
+                    "content": content or "File written.",
+                }
+            )
 
         elif fn_name == "search_files":
             path = fn_args.get("path", None)
@@ -625,15 +754,27 @@ class AgentLoop:
                     f"You may only search under /workspace/{self.challenge_id}/. "
                     f"Default search is your work directory."
                 )
-                await self._emit("ACTION", f"search_files [REJECTED]", "text-danger", tool_name="search_files")
-                await self._emit("OBSERVATION", msg, "text-danger", tool_name="search_files")
-                self.messages.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call_id,
-                    "content": msg,
-                })
+                await self._emit(
+                    "ACTION",
+                    f"search_files [REJECTED]",
+                    "text-danger",
+                    tool_name="search_files",
+                )
+                await self._emit(
+                    "OBSERVATION", msg, "text-danger", tool_name="search_files"
+                )
+                self.messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call_id,
+                        "content": msg,
+                    }
+                )
                 return msg
-            pattern = fn_args.get("pattern") or r"flag|ctf|FLAG|CTF|\{[A-Za-z0-9_\-]{4,}\}|[A-Za-z]+_[A-Za-z]+"
+            pattern = (
+                fn_args.get("pattern")
+                or r"flag|ctf|FLAG|CTF|\{[A-Za-z0-9_\-]{4,}\}|[A-Za-z]+_[A-Za-z]+"
+            )
             pat = shlex.quote(pattern)
             p = shlex.quote(resolved)
             cmd = (
@@ -641,11 +782,27 @@ class AgentLoop:
                 f"rg -na --no-heading -e {pat} {p} 2>/dev/null; "
                 f"else grep -rnaE -e {pat} {p}; fi; }} | head -100"
             )
-            await self._emit("ACTION", f"search_files '{pattern}' in {resolved}", "text-sand", tool_name="search_files")
+            await self._emit(
+                "ACTION",
+                f"search_files '{pattern}' in {resolved}",
+                "text-sand",
+                tool_name="search_files",
+            )
             result = await self._run_sandbox(cmd)
             content = self._format_command_result(result)
-            await self._emit("OBSERVATION", content if content.strip() else "[No matches]", "text-stone", tool_name="search_files")
-            self.messages.append({"role": "tool", "tool_call_id": tool_call_id, "content": content or "[No matches]"})
+            await self._emit(
+                "OBSERVATION",
+                content if content.strip() else "[No matches]",
+                "text-stone",
+                tool_name="search_files",
+            )
+            self.messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tool_call_id,
+                    "content": content or "[No matches]",
+                }
+            )
 
         elif fn_name == "submit_flag":
             flag = fn_args.get("flag", "")
@@ -653,25 +810,34 @@ class AgentLoop:
             self.paused = True
             await self._emit("FLAG", flag, "text-mint", tool_name="submit_flag")
             await self._update_status("FLAG_PROPOSED", proposed_flag=flag)
-            self.messages.append({
-                "role": "tool",
-                "tool_call_id": tool_call_id,
-                "content": f"Flag proposed: {flag}. The run is paused awaiting human verification.",
-            })
+            self.messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tool_call_id,
+                    "content": f"Flag proposed: {flag}. The run is paused awaiting human verification.",
+                }
+            )
 
         else:
-            self.messages.append({
-                "role": "tool",
-                "tool_call_id": tool_call_id,
-                "content": f"Unknown tool: {fn_name}",
-            })
+            self.messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tool_call_id,
+                    "content": f"Unknown tool: {fn_name}",
+                }
+            )
         return None
 
     # ------------------------------------------------------------------
     # Status updates
     # ------------------------------------------------------------------
 
-    async def _update_status(self, status: str, proposed_flag: str | None = None, clear_proposed: bool = False) -> None:
+    async def _update_status(
+        self,
+        status: str,
+        proposed_flag: str | None = None,
+        clear_proposed: bool = False,
+    ) -> None:
         try:
             from ..db.database import AsyncSessionLocal
             from ..db.models import Challenge, ChallengeStatus
@@ -706,7 +872,9 @@ class AgentLoop:
                 last_exc = exc
                 print(f"LLM call failed (attempt {attempt + 1}/3): {exc}")
                 await asyncio.sleep(1.0 * (attempt + 1))
-        await self._emit("SYSTEM", f"LLM error after retries: {last_exc}", "text-danger")
+        await self._emit(
+            "SYSTEM", f"LLM error after retries: {last_exc}", "text-danger"
+        )
         return None
 
     # ------------------------------------------------------------------
@@ -720,7 +888,9 @@ class AgentLoop:
 
         try:
             self.sandbox.ensure_connected()
-            await self._emit("SYSTEM", "Connected to kali-forensics sandbox.", "text-mint")
+            await self._emit(
+                "SYSTEM", "Connected to kali-forensics sandbox.", "text-mint"
+            )
             await self._push_challenge_files()
             await self._inject_tool_inventory()
 
@@ -746,26 +916,38 @@ class AgentLoop:
                     break
 
                 if time.monotonic() - self.started_at > settings.ARGUS_MAX_RUN_SECONDS:
-                    await self._emit("ERROR", "Stopping: max run time exceeded.", "text-danger")
+                    await self._emit(
+                        "ERROR", "Stopping: max run time exceeded.", "text-danger"
+                    )
                     await self._update_status("FAILED")
                     break
 
                 # Stagnation detection: track consecutive tool calls without new info.
-                if self._stagnation_turns >= settings.ARGUS_STAGNATION_TURNS and not self._proposed_flag:
+                if (
+                    self._stagnation_turns >= settings.ARGUS_STAGNATION_TURNS
+                    and not self._proposed_flag
+                ):
                     await self._emit(
                         "SYSTEM",
                         f"[STAGNATION WARNING] You have made {self._stagnation_turns} tool calls without making progress. "
                         f"State your hypothesis, the precise blocker, and ONE concrete new idea. Switch your approach.",
                         "text-lavender",
                     )
-                    self.messages.append({
-                        "role": "user",
-                        "content": "[STAGNATION WARNING] You are stuck. State your hypothesis, the precise blocker, and ONE concrete new idea. Switch your approach.",
-                    })
+                    self.messages.append(
+                        {
+                            "role": "user",
+                            "content": "[STAGNATION WARNING] You are stuck. State your hypothesis, the precise blocker, and ONE concrete new idea. Switch your approach.",
+                        }
+                    )
                     self._stagnation_turns = 0  # Reset after nudge
 
                 # Periodic goal reminder so the model doesn't lose the target / drift.
-                if self._goal and not self._proposed_flag and self.iteration > 0 and self.iteration - self._last_goal_nudge >= 8:
+                if (
+                    self._goal
+                    and not self._proposed_flag
+                    and self.iteration > 0
+                    and self.iteration - self._last_goal_nudge >= 8
+                ):
                     self._last_goal_nudge = self.iteration
                     reminder = (
                         f"[GOAL REMINDER]: You are still looking for {self._goal}. Search for name patterns and "
@@ -777,7 +959,11 @@ class AgentLoop:
 
                 # Only announce the queue when we will actually block on it.
                 if model_scheduler.locked(self.model):
-                    await self._emit("SYSTEM", "Waiting for model queue lock (concurrency)...", "text-stone")
+                    await self._emit(
+                        "SYSTEM",
+                        "Waiting for model queue lock (concurrency)...",
+                        "text-stone",
+                    )
                 await model_scheduler.acquire(self.model)
                 try:
                     await self._emit("PLAN", "Thinking...", "text-lavender")
@@ -789,12 +975,18 @@ class AgentLoop:
                     break
 
                 if response is None:
-                    await self._emit("ERROR", "Error: no response from LLM after retries.", "text-danger")
+                    await self._emit(
+                        "ERROR",
+                        "Error: no response from LLM after retries.",
+                        "text-danger",
+                    )
                     await self._update_status("FAILED")
                     break
 
                 if "choices" not in response or not response["choices"]:
-                    await self._emit("ERROR", "Error: unexpected LLM response shape.", "text-danger")
+                    await self._emit(
+                        "ERROR", "Error: unexpected LLM response shape.", "text-danger"
+                    )
                     await self._update_status("FAILED")
                     break
 
@@ -811,15 +1003,19 @@ class AgentLoop:
                 if reasoning:
                     await self._emit("HYPOTHESIS", reasoning, "text-iris")
                 if message.get("content"):
-                    await self._emit("OBSERVATION", message["content"].strip(), "text-cream")
+                    await self._emit(
+                        "OBSERVATION", message["content"].strip(), "text-cream"
+                    )
 
                 finish = choice.get("finish_reason")
                 if finish == "length":
                     # Generation was cut off mid-response — keep going.
-                    self.messages.append({
-                        "role": "user",
-                        "content": "Your previous response was cut off. Continue exactly where you left off.",
-                    })
+                    self.messages.append(
+                        {
+                            "role": "user",
+                            "content": "Your previous response was cut off. Continue exactly where you left off.",
+                        }
+                    )
                     self.iteration += 1
                     self._stagnation_turns += 1
                     continue
@@ -831,26 +1027,43 @@ class AgentLoop:
                             break
                         fn_name = tool_call["function"]["name"]
                         try:
-                            fn_args = json.loads(tool_call["function"].get("arguments") or "{}")
+                            fn_args = json.loads(
+                                tool_call["function"].get("arguments") or "{}"
+                            )
                         except json.JSONDecodeError as exc:
-                            await self._emit("SYSTEM", f"Malformed tool arguments: {exc}", "text-danger")
-                            self.messages.append({
-                                "role": "tool",
-                                "tool_call_id": tool_call["id"],
-                                "content": f"Error: could not parse arguments ({exc}). Please provide valid JSON.",
-                            })
+                            await self._emit(
+                                "SYSTEM",
+                                f"Malformed tool arguments: {exc}",
+                                "text-danger",
+                            )
+                            self.messages.append(
+                                {
+                                    "role": "tool",
+                                    "tool_call_id": tool_call["id"],
+                                    "content": f"Error: could not parse arguments ({exc}). Please provide valid JSON.",
+                                }
+                            )
                             continue
-                        nudge = await self._handle_tool_call(tool_call["id"], fn_name, fn_args)
+                        nudge = await self._handle_tool_call(
+                            tool_call["id"], fn_name, fn_args
+                        )
                         if nudge:
                             nudges.append(nudge)
                             self._stagnation_turns = 0  # Reset on nudge (intervention)
                         else:
-                            self._stagnation_turns += 1  # Increment on successful tool call
+                            self._stagnation_turns += (
+                                1  # Increment on successful tool call
+                            )
 
                     if nudges:
                         guidance = "\n".join(nudges)
                         await self._emit("SYSTEM", guidance, "text-lavender")
-                        self.messages.append({"role": "user", "content": f"[SYSTEM GUIDANCE]: {guidance}"})
+                        self.messages.append(
+                            {
+                                "role": "user",
+                                "content": f"[SYSTEM GUIDANCE]: {guidance}",
+                            }
+                        )
                     self.iteration += 1
                 else:
                     await self._emit(
@@ -867,7 +1080,9 @@ class AgentLoop:
             await self._update_status("FAILED")
 
         finally:
-            await self._emit("SYSTEM", "Cleaning up sandbox connection...", "text-stone")
+            await self._emit(
+                "SYSTEM", "Cleaning up sandbox connection...", "text-stone"
+            )
             await asyncio.to_thread(self.sandbox.disconnect)
             await self._emit("SYSTEM", "Agent finished execution.", "text-mint")
             self.running = False
@@ -875,6 +1090,7 @@ class AgentLoop:
             self._resume_event.set()
 
             import backend.main as main
+
             if main.active_agents.get(self.challenge_id) is self:
                 del main.active_agents[self.challenge_id]
 
@@ -895,7 +1111,9 @@ class AgentLoop:
         await self._update_status("IN_PROGRESS", clear_proposed=True)
 
     def inject_intervention(self, text: str):
-        self.messages.append({
-            "role": "user",
-            "content": f"[USER INTERVENTION]: {text}",
-        })
+        self.messages.append(
+            {
+                "role": "user",
+                "content": f"[USER INTERVENTION]: {text}",
+            }
+        )

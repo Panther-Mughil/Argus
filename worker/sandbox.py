@@ -199,7 +199,9 @@ class SandboxManager:
         stdin, stdout, stderr = self._client.exec_command(f"mkdir -p {remote_dir}")
         stdout.channel.recv_exit_status()
 
-    def copy_originals_to_work(self, challenge_id: int, sandbox_root: str = "/workspace") -> None:
+    def copy_originals_to_work(
+        self, challenge_id: int, sandbox_root: str = "/workspace"
+    ) -> None:
         """Stage a clean copy of the originals into the work directory.
 
         Removes any stale contents in *work/* first, then copies files

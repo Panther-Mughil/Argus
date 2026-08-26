@@ -6,6 +6,7 @@ The registry lives in ``backend/models.json``: a list of providers, each with an
 owning provider for any model id so Argus can talk to more than one endpoint
 (and, later, free web gateways) without hardcoding a single provider.
 """
+
 import json
 import os
 from pathlib import Path
@@ -24,7 +25,9 @@ def _load_models_config() -> dict:
     try:
         return json.loads(MODELS_CONFIG_PATH.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as e:
-        raise RuntimeError(f"Failed to load models config from {MODELS_CONFIG_PATH}: {e}") from e
+        raise RuntimeError(
+            f"Failed to load models config from {MODELS_CONFIG_PATH}: {e}"
+        ) from e
 
 
 MODELS_CONFIG = _load_models_config()
@@ -52,16 +55,18 @@ def model_list() -> list[dict]:
     rows = []
     for provider in MODELS_CONFIG["providers"]:
         for model in provider.get("models") or []:
-            rows.append({
-                "id": model.get("id"),
-                "display_name": model.get("display_name", model.get("id")),
-                "provider": provider.get("name"),
-                "api_type": provider.get("api_type", "openai-completions"),
-                "base_url": provider.get("base_url"),
-                "ctx": model.get("ctx"),
-                "free": bool(model.get("free", False)),
-                "concurrency": provider.get("concurrency", 1),
-            })
+            rows.append(
+                {
+                    "id": model.get("id"),
+                    "display_name": model.get("display_name", model.get("id")),
+                    "provider": provider.get("name"),
+                    "api_type": provider.get("api_type", "openai-completions"),
+                    "base_url": provider.get("base_url"),
+                    "ctx": model.get("ctx"),
+                    "free": bool(model.get("free", False)),
+                    "concurrency": provider.get("concurrency", 1),
+                }
+            )
     return rows
 
 
@@ -85,11 +90,13 @@ def _sanitize_messages(messages: list) -> list:
                 entry["tool_calls"] = m["tool_calls"]
             cleaned.append(entry)
         elif role == "tool":
-            cleaned.append({
-                "role": "tool",
-                "tool_call_id": m.get("tool_call_id"),
-                "content": m.get("content", ""),
-            })
+            cleaned.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": m.get("tool_call_id"),
+                    "content": m.get("content", ""),
+                }
+            )
         else:
             cleaned.append({"role": role, "content": m.get("content", "")})
     return cleaned
@@ -147,8 +154,10 @@ async def generate_chat_completion(
         response.raise_for_status()
         return response.json()
 
+
 class RateLimitError(Exception):
     pass
+
 
 class QuotaExceededError(Exception):
     pass

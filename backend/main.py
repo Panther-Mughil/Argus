@@ -2,6 +2,7 @@ from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+
 # pi-lens-ignore: python-hallucinated-import — sqlalchemy exposes `text` and `delete`; rule is a false positive.
 from sqlalchemy import text, delete
 from contextlib import asynccontextmanager
@@ -63,9 +64,15 @@ async def lifespan(app: FastAPI):
     # User auth columns (no Alembic) — idempotent startup migration.
     try:
         async with engine.connect() as conn:
-            await conn.exec_driver_sql("ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR")
-            await conn.exec_driver_sql("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash VARCHAR")
-            await conn.exec_driver_sql("ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR DEFAULT 'user'")
+            await conn.exec_driver_sql(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash VARCHAR"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR DEFAULT 'user'"
+            )
             await conn.commit()
     except Exception as exc:
         print(f"User auth migration skipped: {exc}")
@@ -73,6 +80,7 @@ async def lifespan(app: FastAPI):
     # Seed the default admin account.
     try:
         from .db.database import AsyncSessionLocal
+
         async with AsyncSessionLocal() as session:
             await seed_admin_user(session)
     except Exception as exc:
@@ -81,13 +89,16 @@ async def lifespan(app: FastAPI):
     # Session owner column + default-session bootstrap (idempotent).
     try:
         async with engine.connect() as conn:
-            await conn.exec_driver_sql("ALTER TABLE ctf_sessions ADD COLUMN IF NOT EXISTS owner_id INTEGER")
+            await conn.exec_driver_sql(
+                "ALTER TABLE ctf_sessions ADD COLUMN IF NOT EXISTS owner_id INTEGER"
+            )
             await conn.commit()
     except Exception as exc:
         print(f"Session owner migration skipped: {exc}")
 
     try:
         from .db.database import AsyncSessionLocal
+
         async with AsyncSessionLocal() as session:
             await ensure_default_session(session)
     except Exception as exc:
@@ -135,7 +146,23 @@ from backend.storage import (
     OversizeError,
 )
 
-CHALLENGE_CATEGORIES = {"Web", "Pwn", "Reverse Engineering", "Cryptography", "Forensics", "OSINT", "Misc", "Steganography", "Programming", "Hardware", "Cloud", "Blockchain", "Mobile", "Network", "AI/ML"}
+CHALLENGE_CATEGORIES = {
+    "Web",
+    "Pwn",
+    "Reverse Engineering",
+    "Cryptography",
+    "Forensics",
+    "OSINT",
+    "Misc",
+    "Steganography",
+    "Programming",
+    "Hardware",
+    "Cloud",
+    "Blockchain",
+    "Mobile",
+    "Network",
+    "AI/ML",
+}
 
 # Event type -> tailwind text color, used when replaying persisted events.
 _EVENT_COLORS = {
@@ -145,6 +172,7 @@ _EVENT_COLORS = {
     "HYPOTHESIS": "text-iris",
     "SYSTEM": "text-mint",
 }
+
 
 class ConnectionManager:
     def __init__(self):
@@ -166,6 +194,7 @@ class ConnectionManager:
             for connection in self.active_connections[challenge_id]:
                 await connection.send_text(json.dumps(message))
 
+
 manager = ConnectionManager()
 active_agents: Dict[int, AgentLoop] = {}
 
@@ -176,7 +205,10 @@ FRONTEND_DIST = FRONTEND_DIR / "dist"
 # Serve built Vite assets (JS/CSS) if the production build exists. Mounted
 # only when present so the backend still imports cleanly before a first build.
 if (FRONTEND_DIST / "assets").is_dir():
-    app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIST / "assets")), name="assets")
+    app.mount(
+        "/assets", StaticFiles(directory=str(FRONTEND_DIST / "assets")), name="assets"
+    )
+
 
 @app.get("/")
 async def serve_frontend():
@@ -189,6 +221,7 @@ async def serve_frontend():
         return HTMLResponse(content=source_index.read_text(encoding="utf-8"))
     raise HTTPException(status_code=404, detail="index.html not found")
 
+
 @app.get("/favicon.svg")
 async def serve_favicon():
     try:
@@ -199,9 +232,11 @@ async def serve_favicon():
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail="favicon.svg not found") from e
 
+
 @app.get("/health")
 async def health_check():
     return {"status": "ok", "message": "Argus Backend is running."}
+
 
 @app.get("/api/challenges")
 async def get_challenges(
@@ -217,6 +252,7 @@ async def get_challenges(
     challenges = result.scalars().all()
     return challenges
 
+
 @app.get("/api/models")
 async def get_models(current_user: User = Depends(get_current_user)):
     """List available models from the registry (drives the UI dropdown)."""
@@ -228,7 +264,12 @@ class _ModelChoice(BaseModel):
 
 
 @app.post("/api/challenges/{challenge_id}/model")
-async def set_challenge_model(challenge_id: int, choice: _ModelChoice, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def set_challenge_model(
+    challenge_id: int,
+    choice: _ModelChoice,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """Set the model used for a challenge's next agent run."""
     challenge = await db.get(Challenge, challenge_id)
     if not challenge:
@@ -258,7 +299,10 @@ async def create_challenge(
     like the post-create upload endpoint. No ``flag`` field is exposed.
     """
     if category not in CHALLENGE_CATEGORIES:
-        raise HTTPException(status_code=400, detail=f"Invalid category. Must be one of: {', '.join(sorted(CHALLENGE_CATEGORIES))}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid category. Must be one of: {', '.join(sorted(CHALLENGE_CATEGORIES))}",
+        )
     if assigned_model and assigned_model not in known_model_ids():
         raise HTTPException(status_code=400, detail=f"Unknown model '{assigned_model}'")
 
@@ -271,17 +315,29 @@ async def create_challenge(
         session = await db.get(CtfSession, sid)
         if not session:
             raise HTTPException(status_code=400, detail="Session not found")
-        if not (session.owner_id == current_user.id or (current_user.team_id is not None and session.team_id == current_user.team_id)):
-            raise HTTPException(status_code=403, detail="Not allowed to use this session")
+        if not (
+            session.owner_id == current_user.id
+            or (
+                current_user.team_id is not None
+                and session.team_id == current_user.team_id
+            )
+        ):
+            raise HTTPException(
+                status_code=403, detail="Not allowed to use this session"
+            )
     else:
         session = (
-            await db.execute(
-                select(CtfSession)
-                .where(session_scope_filter(current_user))
-                .order_by(CtfSession.id.asc())
-                .limit(1)
+            (
+                await db.execute(
+                    select(CtfSession)
+                    .where(session_scope_filter(current_user))
+                    .order_by(CtfSession.id.asc())
+                    .limit(1)
+                )
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
         if session is None:
             session = CtfSession(name="Default", owner_id=current_user.id)
             db.add(session)
@@ -329,15 +385,20 @@ async def create_challenge(
         "uploaded_files": uploaded,
     }
 
+
 @app.post("/api/challenges/{challenge_id}/start")
-async def start_agent(challenge_id: int, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def start_agent(
+    challenge_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     challenge = await db.get(Challenge, challenge_id)
     if not challenge:
         raise HTTPException(status_code=404, detail="Challenge not found")
-    
+
     challenge.status = ChallengeStatus.IN_PROGRESS
     await db.commit()
-    
+
     # Start the real agent in the background
     agent = AgentLoop(
         challenge_id,
@@ -349,27 +410,36 @@ async def start_agent(challenge_id: int, current_user: User = Depends(get_curren
     )
     active_agents[challenge_id] = agent
     asyncio.create_task(agent.run())
-    
+
     return {"status": "Agent started"}
 
+
 @app.post("/api/challenges/{challenge_id}/stop")
-async def stop_agent(challenge_id: int, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def stop_agent(
+    challenge_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     challenge = await db.get(Challenge, challenge_id)
     if not challenge:
         raise HTTPException(status_code=404, detail="Challenge not found")
-    
+
     if challenge_id in active_agents:
         active_agents[challenge_id].stop()
         del active_agents[challenge_id]
-        
+
     challenge.status = ChallengeStatus.FAILED
     await db.commit()
-    
+
     return {"status": "Agent stopped"}
 
 
 @app.post("/api/challenges/{challenge_id}/restart")
-async def restart_agent(challenge_id: int, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def restart_agent(
+    challenge_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """Re-run a challenge's agent completely fresh, without deleting the challenge
     or re-uploading its files.
 
@@ -391,8 +461,11 @@ async def restart_agent(challenge_id: int, current_user: User = Depends(get_curr
     try:
         from .db.database import AsyncSessionLocal
         from .db.models import EventLog
+
         async with AsyncSessionLocal() as session:
-            await session.execute(delete(EventLog).where(EventLog.challenge_id == challenge_id))
+            await session.execute(
+                delete(EventLog).where(EventLog.challenge_id == challenge_id)
+            )
             await session.commit()
     except Exception as exc:
         print(f"Restart: failed to clear event log for {challenge_id}: {exc}")
@@ -413,8 +486,13 @@ async def restart_agent(challenge_id: int, current_user: User = Depends(get_curr
 
     return {"status": "Agent restarted"}
 
+
 @app.post("/api/challenges/{challenge_id}/solved")
-async def mark_solved(challenge_id: int, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def mark_solved(
+    challenge_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """Mark a challenge solved after a human confirms the proposed flag."""
     challenge = await db.get(Challenge, challenge_id)
     if not challenge:
@@ -428,6 +506,7 @@ async def mark_solved(challenge_id: int, current_user: User = Depends(get_curren
         del active_agents[challenge_id]
 
     return {"status": "Marked solved"}
+
 
 @app.post("/api/challenges/{challenge_id}/files", status_code=201)
 async def upload_challenge_file(
@@ -463,8 +542,13 @@ async def upload_challenge_file(
 
     return {"filename": path.name, "size": path.stat().st_size}
 
+
 @app.get("/api/challenges/{challenge_id}/files")
-async def list_challenge_files(challenge_id: int, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def list_challenge_files(
+    challenge_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """List the uploaded files for a challenge."""
     challenge = await db.get(Challenge, challenge_id)
     if not challenge:
@@ -473,23 +557,29 @@ async def list_challenge_files(challenge_id: int, current_user: User = Depends(g
     files = list_files(challenge_id)
     return {"files": [{"filename": name, "size": size} for name, size in files]}
 
+
 def _cleanup_remote_workspace(challenge_id: int) -> None:
     """Best-effort removal of the container workspace dir for a challenge."""
     from worker.sandbox import SandboxManager
+
     SandboxManager().remove_remote_dir(f"/workspace/{challenge_id}")
 
 
 @app.delete("/api/challenges/{challenge_id}")
-async def delete_challenge(challenge_id: int, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def delete_challenge(
+    challenge_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     challenge = await db.get(Challenge, challenge_id)
     if not challenge:
         raise HTTPException(status_code=404, detail="Challenge not found")
-    
+
     # If agent is running, stop it first
     if challenge_id in active_agents:
         active_agents[challenge_id].stop()
         del active_agents[challenge_id]
-        
+
     await db.delete(challenge)
     await db.commit()
 
@@ -501,9 +591,12 @@ async def delete_challenge(challenge_id: int, current_user: User = Depends(get_c
         await asyncio.to_thread(_cleanup_remote_workspace, challenge_id)
     except Exception as exc:
         # Non-fatal: cleanup inside the container is best-effort.
-        print(f"Failed to clean up container workspace for challenge {challenge_id}: {exc}")
-    
+        print(
+            f"Failed to clean up container workspace for challenge {challenge_id}: {exc}"
+        )
+
     return {"status": "Challenge deleted"}
+
 
 async def _replay_events(websocket: WebSocket, challenge_id: int):
     """Send recent persisted events to a freshly-connected client."""
@@ -524,14 +617,23 @@ async def _replay_events(websocket: WebSocket, challenge_id: int):
         return
 
     for event in events:
-        etype = event.event_type.value if hasattr(event.event_type, "value") else str(event.event_type)
+        etype = (
+            event.event_type.value
+            if hasattr(event.event_type, "value")
+            else str(event.event_type)
+        )
         ts = event.created_at.strftime("%H:%M:%S") if event.created_at else ""
-        await websocket.send_text(json.dumps({
-            "type": etype,
-            "content": event.content,
-            "timestamp": ts,
-            "color": _EVENT_COLORS.get(etype, "text-cream"),
-        }))
+        await websocket.send_text(
+            json.dumps(
+                {
+                    "type": etype,
+                    "content": event.content,
+                    "timestamp": ts,
+                    "color": _EVENT_COLORS.get(etype, "text-cream"),
+                }
+            )
+        )
+
 
 @app.websocket("/api/ws/challenges/{challenge_id}")
 async def websocket_endpoint(websocket: WebSocket, challenge_id: int):
@@ -541,16 +643,16 @@ async def websocket_endpoint(websocket: WebSocket, challenge_id: int):
         while True:
             # Wait for any messages from the client (e.g. human intervention)
             data = await websocket.receive_text()
-            
+
             # Broadcast to UI
             msg = {
                 "type": "USER_INTERVENTION",
                 "content": data,
                 "timestamp": "now",
-                "color": "text-lavender"
+                "color": "text-lavender",
             }
             await manager.broadcast_to_challenge(challenge_id, msg)
-            
+
             # Inject into active agent context
             if challenge_id in active_agents:
                 agent = active_agents[challenge_id]
