@@ -4,44 +4,23 @@
             :class="collapsed ? 'w-16' : 'w-64'"
             class="shrink-0 border-r border-sand/30 bg-plum flex flex-col transition-all duration-200"
         >
-            <!-- Header: logo + collapse toggle -->
-            <div class="flex items-center justify-between px-3 py-4">
-                <div class="flex items-center space-x-2 min-w-0">
+            <!-- Header: the Argus logo is the collapse/expand button -->
+            <div class="px-3 py-3">
+                <button
+                    @click="toggle"
+                    class="flex items-center p-2 rounded-lg hover:bg-aubergine/40 transition group w-full"
+                    :class="collapsed ? 'justify-center' : 'justify-start space-x-2'"
+                    :title="collapsed ? 'Expand sidebar' : 'Collapse sidebar'"
+                >
                     <img
                         src="/favicon.svg"
-                        class="w-8 h-8 shrink-0"
+                        class="w-8 h-8 shrink-0 transition-transform group-hover:scale-105"
                     />
                     <span
                         v-if="!collapsed"
                         class="text-lg font-medium tracking-[0.02em] whitespace-nowrap"
                         >Argus</span
                     >
-                </div>
-                <button
-                    @click="toggle"
-                    class="text-stone hover:text-cream transition shrink-0"
-                    :title="collapsed ? 'Expand sidebar' : 'Collapse sidebar'"
-                >
-                    <svg
-                        v-if="!collapsed"
-                        class="w-5 h-5"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        viewBox="0 0 24 24"
-                    >
-                        <polyline points="15 18 9 12 15 6"></polyline>
-                    </svg>
-                    <svg
-                        v-else
-                        class="w-5 h-5"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        viewBox="0 0 24 24"
-                    >
-                        <polyline points="9 18 15 12 9 6"></polyline>
-                    </svg>
                 </button>
             </div>
 
