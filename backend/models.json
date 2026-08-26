@@ -4,24 +4,10 @@
       "name": "Onyx",
       "api_type": "openai-completions",
       "base_url": "http://10.0.2.2:12057/v1",
-      "api_key": null,
+      "api_key": "",
+      "api_key_env": "",
       "concurrency": 1,
-      "models": [
-        {
-          "id": "Qwen3.6-35B-A3B",
-          "display_name": "Qwen3.6 35B A3B",
-          "ctx": 131072,
-          "free": false,
-          "notes": "Proven solver; strong for long-horizon forensics. Default."
-        },
-        {
-          "id": "Gemma-4-26B-A4B",
-          "display_name": "Gemma 4 26B A4B",
-          "ctx": 131072,
-          "free": false,
-          "notes": "Tryable per-challenge model."
-        }
-      ]
+      "models": []
     }
   ]
 }

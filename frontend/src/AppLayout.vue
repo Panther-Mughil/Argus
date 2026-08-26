@@ -54,32 +54,12 @@
                 </div>
             </div>
 
-            <!-- Collapsed session shortcut -->
-            <button
-                v-else
-                @click="collapsed = false"
-                class="mb-4 mx-auto p-2 rounded-lg text-stone hover:text-cream hover:bg-aubergine/60 transition"
-                title="Sessions"
-            >
-                <svg
-                    class="w-5 h-5"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    viewBox="0 0 24 24"
-                >
-                    <rect x="3" y="3" width="7" height="7"></rect>
-                    <rect x="14" y="3" width="7" height="7"></rect>
-                    <rect x="14" y="14" width="7" height="7"></rect>
-                    <rect x="3" y="14" width="7" height="7"></rect>
-                </svg>
-            </button>
-
             <nav class="space-y-1 flex-1 px-3">
                 <router-link
                     to="/"
-                    class="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-aubergine/60 transition"
+                    class="flex items-center py-2 rounded-lg hover:bg-aubergine/60 transition"
                     active-class="bg-aubergine"
+                    :class="collapsed ? 'justify-center' : 'justify-start space-x-3 px-3'"
                     :title="collapsed ? 'Main Dashboard' : ''"
                 >
                     <svg
@@ -98,8 +78,9 @@
                 </router-link>
                 <router-link
                     to="/settings"
-                    class="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-aubergine/60 transition"
+                    class="flex items-center py-2 rounded-lg hover:bg-aubergine/60 transition"
                     active-class="bg-aubergine"
+                    :class="collapsed ? 'justify-center' : 'justify-start space-x-3 px-3'"
                     :title="collapsed ? 'Settings' : ''"
                 >
                     <svg
@@ -120,7 +101,8 @@
 
             <button
                 @click="logout"
-                class="flex items-center space-x-3 px-3 py-2 text-stone hover:text-danger transition"
+                class="flex items-center py-2 text-stone hover:text-danger transition"
+                :class="collapsed ? 'justify-center' : 'justify-start space-x-3 px-3'"
                 :title="collapsed ? 'Logout' : ''"
             >
                 <svg
