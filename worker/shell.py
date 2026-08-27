@@ -30,14 +30,28 @@ def _recv(channel) -> bytes | None:
         return None
 
 
+async def _safe_send(websocket, text: str) -> None:
+    """Send text without raising if the client has already disconnected."""
+    try:
+        await websocket.send_text(text)
+    except Exception as exc:
+        logger.debug("ws send failed (client gone): %s", exc)
+
+
 async def handle_shell(websocket, host_name: str) -> None:
     """Accept a WebSocket and run an interactive shell on the named host."""
-    await websocket.accept()
+    try:
+        await websocket.accept()
+    except Exception:
+        return
 
     host = _find_host(host_name)
     if not host:
-        await websocket.send_text(f"[ARGUS] Unknown host: {host_name}\r\n")
-        await websocket.close()
+        await _safe_send(websocket, f"[ARGUS] Unknown host: {host_name}\r\n")
+        try:
+            await websocket.close()
+        except Exception as exc:
+            logger.debug("ws close failed (unknown host): %s", exc)
         return
 
     client = paramiko.SSHClient()
@@ -52,11 +66,23 @@ async def handle_shell(websocket, host_name: str) -> None:
             timeout=10,
         )
     except Exception as exc:
-        await websocket.send_text(f"[ARGUS] SSH connection failed: {exc}\r\n")
-        await websocket.close()
+        await _safe_send(websocket, f"[ARGUS] SSH connection failed: {exc}\r\n")
+        try:
+            await websocket.close()
+        except Exception as exc:
+            logger.debug("ws close failed (ssh error): %s", exc)
         return
 
-    channel = client.invoke_shell(width=120, height=32)
+    try:
+        channel = client.invoke_shell(width=120, height=32)
+    except Exception as exc:
+        await _safe_send(websocket, f"[ARGUS] Failed to open shell: {exc}\r\n")
+        try:
+            await websocket.close()
+        except Exception as exc:
+            logger.debug("ws close failed (shell error): %s", exc)
+        client.close()
+        return
     channel.settimeout(0.5)
 
     async def pump_input_to_shell():

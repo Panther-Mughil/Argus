@@ -1,16 +1,16 @@
+from datetime import UTC, datetime, timedelta
+
 import bcrypt
 import jwt
-from datetime import datetime, timedelta
-from typing import Optional
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
+from sqlalchemy import func, or_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from .config import settings
 from .db.database import get_db
-from .db.models import User, Team, CtfSession, Challenge, EventLog
-from sqlalchemy import or_, func, update
+from .db.models import Challenge, CtfSession, EventLog, Team, User
 
 
 # Password hashing utilities
@@ -22,21 +22,17 @@ def hash_password(password: str) -> str:
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify a stored password against one provided by user."""
-    return bcrypt.checkpw(
-        plain_password.encode("utf-8"), hashed_password.encode("utf-8")
-    )
+    return bcrypt.checkpw(plain_password.encode("utf-8"), hashed_password.encode("utf-8"))
 
 
 # JWT utilities
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+def create_access_token(data: dict, expires_delta: timedelta | None = None):
     """Create a JWT access token."""
     to_encode = data.copy()
     if expires_delta:
-        expire = datetime.utcnow() + expires_delta
+        expire = datetime.now(UTC) + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(
-            minutes=settings.ARGUS_JWT_EXPIRES_MINUTES
-        )
+        expire = datetime.now(UTC) + timedelta(minutes=settings.ARGUS_JWT_EXPIRES_MINUTES)
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, settings.ARGUS_JWT_SECRET, algorithm="HS256")
     return encoded_jwt
@@ -65,9 +61,7 @@ def decode_token(token: str):
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/login")
 
 
-async def get_current_user(
-    token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)
-):
+async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)):
     """Get the current user from the JWT token."""
     payload = decode_token(token)
     username = payload.get("sub")
@@ -108,9 +102,7 @@ def admin_required(current_user: User = Depends(get_current_active_user)):
 
 async def seed_admin_user(db: AsyncSession):
     """Seed the default admin user if it doesn't exist."""
-    result = await db.execute(
-        select(User).where(User.username == settings.ARGUS_ADMIN_USERNAME)
-    )
+    result = await db.execute(select(User).where(User.username == settings.ARGUS_ADMIN_USERNAME))
     admin_user = result.scalars().first()
 
     if not admin_user:
@@ -156,20 +148,14 @@ async def ensure_default_session(db: AsyncSession) -> CtfSession:
     result = await db.execute(select(CtfSession).order_by(CtfSession.id.asc()).limit(1))
     default = result.scalars().first()
     if default is None:
-        admin = (
-            (await db.execute(select(User).where(User.role == "admin")))
-            .scalars()
-            .first()
-        )
+        admin = (await db.execute(select(User).where(User.role == "admin"))).scalars().first()
         default = CtfSession(name="Default", owner_id=admin.id if admin else None)
         db.add(default)
         await db.commit()
         await db.refresh(default)
 
     await db.execute(
-        update(Challenge)
-        .where(Challenge.session_id.is_(None))
-        .values(session_id=default.id)
+        update(Challenge).where(Challenge.session_id.is_(None)).values(session_id=default.id)
     )
     await db.commit()
     return default
@@ -192,11 +178,7 @@ class ChangePasswordRequest(BaseModel):
 async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.username == body.username))
     user = result.scalars().first()
-    if (
-        not user
-        or not user.password_hash
-        or not verify_password(body.password, user.password_hash)
-    ):
+    if not user or not user.password_hash or not verify_password(body.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     token = create_access_token({"sub": user.username, "role": user.role})
     return {
@@ -280,9 +262,7 @@ async def get_team(
     team = await db.get(Team, team_id)
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
-    members = [
-        {"id": u.id, "username": u.username, "email": u.email} for u in team.users
-    ]
+    members = [{"id": u.id, "username": u.username, "email": u.email} for u in team.users]
     return {"id": team.id, "name": team.name, "members": members}
 
 
@@ -300,9 +280,7 @@ async def add_member(
     user = result.scalars().first()
     if not user:
         username = body.email.split("@")[0] or "user"
-        user = User(
-            username=username, email=body.email, password_hash=None, role="user"
-        )
+        user = User(username=username, email=body.email, password_hash=None, role="user")
         db.add(user)
         await db.commit()
         await db.refresh(user)
@@ -463,9 +441,7 @@ async def get_session(
             {
                 "id": h.id,
                 "challenge_id": h.challenge_id,
-                "type": h.event_type.value
-                if hasattr(h.event_type, "value")
-                else str(h.event_type),
+                "type": h.event_type.value if hasattr(h.event_type, "value") else str(h.event_type),
                 "content": h.content,
                 "created_at": str(h.created_at) if h.created_at else None,
             }
@@ -484,9 +460,7 @@ async def delete_session(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     if session.owner_id != current_user.id:
-        raise HTTPException(
-            status_code=403, detail="Only the session owner can delete it"
-        )
+        raise HTTPException(status_code=403, detail="Only the session owner can delete it")
 
     # Move its challenges to the default/first session so the FK isn't violated.
     default = (

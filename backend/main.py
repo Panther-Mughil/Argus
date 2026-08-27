@@ -1,25 +1,25 @@
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form
+from contextlib import asynccontextmanager
+
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+
+# pi-lens-ignore: python-hallucinated-import — sqlalchemy exposes `text` and `delete`; rule is a false positive.
+from sqlalchemy import delete, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-# pi-lens-ignore: python-hallucinated-import — sqlalchemy exposes `text` and `delete`; rule is a false positive.
-from sqlalchemy import text, delete
-from contextlib import asynccontextmanager
-
-from .db.database import engine, Base, get_db
-from .db.models import Challenge, ChallengeStatus, User, CtfSession
+from .admin import admin_router
 from .auth import (
     auth_router,
-    teams_router,
-    sessions_router,
-    seed_admin_user,
     ensure_default_session,
     get_current_user,
+    seed_admin_user,
     session_scope_filter,
+    sessions_router,
+    teams_router,
 )
-
-from .admin import admin_router
+from .db.database import Base, engine, get_db
+from .db.models import Challenge, ChallengeStatus, CtfSession, User
 
 # Adds FLAG_PROPOSED to the native Postgres enum if the DB was created before
 # that value existed. Idempotent on Postgres 12+ (compose uses postgres:15).
@@ -129,25 +129,26 @@ app.include_router(teams_router)
 app.include_router(sessions_router)
 app.include_router(admin_router)
 
+import asyncio
+import json
+import os
+from pathlib import Path
+
+from fastapi import WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from pathlib import Path
-import os
-import json
-import asyncio
-from fastapi import WebSocket, WebSocketDisconnect, UploadFile, File
-from typing import Dict, List, Optional
 from pydantic import BaseModel
 
-from .agent.loop import AgentLoop
-from .agent.llm import model_list, default_model, known_model_ids
 from backend.storage import (
-    list_files,
-    save_upload,
-    sanitize_filename,
-    delete_challenge_files,
     OversizeError,
+    delete_challenge_files,
+    list_files,
+    sanitize_filename,
+    save_upload,
 )
+
+from .agent.llm import default_model, known_model_ids, model_list
+from .agent.loop import AgentLoop
 
 CHALLENGE_CATEGORIES = {
     "Web",
@@ -180,7 +181,7 @@ _EVENT_COLORS = {
 class ConnectionManager:
     def __init__(self):
         # Maps challenge_id to a list of connected WebSockets
-        self.active_connections: Dict[int, List[WebSocket]] = {}
+        self.active_connections: dict[int, list[WebSocket]] = {}
 
     async def connect(self, websocket: WebSocket, challenge_id: int):
         await websocket.accept()
@@ -199,7 +200,7 @@ class ConnectionManager:
 
 
 manager = ConnectionManager()
-active_agents: Dict[int, AgentLoop] = {}
+active_agents: dict[int, AgentLoop] = {}
 
 # Static frontend files served by the backend (same-origin)
 FRONTEND_DIR = Path(os.path.dirname(os.path.dirname(__file__))) / "frontend"
@@ -243,7 +244,7 @@ async def health_check():
 
 @app.get("/api/challenges")
 async def get_challenges(
-    session_id: Optional[int] = None,
+    session_id: int | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -292,7 +293,7 @@ async def create_challenge(
     description: str = Form(""),
     assigned_model: str = Form(""),
     session_id: str = Form(""),
-    files: List[UploadFile] = File([]),
+    files: list[UploadFile] = File([]),
     db: AsyncSession = Depends(get_db),
 ):
     """Create a challenge (multipart/form-data).

@@ -10,12 +10,10 @@ owning provider for any model id so Argus can talk to more than one endpoint
 import json
 import os
 from pathlib import Path
-from typing import Optional
 
 import httpx
 
 from backend.config import settings
-
 
 # Load the model registry once at import time.
 MODELS_CONFIG_PATH = Path(__file__).resolve().parent.parent / "models.json"
@@ -108,7 +106,7 @@ def _sanitize_messages(messages: list) -> list:
     return cleaned
 
 
-def _get_api_key(provider: dict) -> Optional[str]:
+def _get_api_key(provider: dict) -> str | None:
     """Get the API key from the provider dict, falling back to env if needed."""
     if provider.get("api_key"):
         return provider["api_key"]
@@ -120,8 +118,8 @@ def _get_api_key(provider: dict) -> Optional[str]:
 async def generate_chat_completion(
     model: str,
     messages: list,
-    tools: Optional[list] = None,
-    max_tokens: Optional[int] = None,
+    tools: list | None = None,
+    max_tokens: int | None = None,
 ):
     """Call the OpenAI-compatible endpoint that owns ``model``.
 

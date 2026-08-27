@@ -17,14 +17,13 @@ import re
 import shlex
 import time
 from datetime import datetime
-from pathlib import Path as StdPath
-from typing import Optional
 
-from .llm import generate_chat_completion, default_model
-from .scheduler import model_scheduler
-from backend.storage import list_files, challenge_dir
 from backend.config import settings
+from backend.storage import challenge_dir, list_files
 from worker.sandbox import SandboxManager
+
+from .llm import default_model, generate_chat_completion
+from .scheduler import model_scheduler
 
 # ---------------------------------------------------------------------------
 # Load prompt/tool content from JSON config files (TASK A + B).
@@ -756,7 +755,7 @@ class AgentLoop:
                 )
                 await self._emit(
                     "ACTION",
-                    f"search_files [REJECTED]",
+                    "search_files [REJECTED]",
                     "text-danger",
                     tool_name="search_files",
                 )
@@ -1075,7 +1074,7 @@ class AgentLoop:
                     break
 
         except Exception as e:
-            await self._emit("ERROR", f"Agent Error: {str(e)}", "text-danger")
+            await self._emit("ERROR", f"Agent Error: {e!s}", "text-danger")
             print(f"Agent Loop Error: {e}")
             await self._update_status("FAILED")
 
@@ -1089,7 +1088,7 @@ class AgentLoop:
             self.paused = False
             self._resume_event.set()
 
-            import backend.main as main
+            from backend import main
 
             if main.active_agents.get(self.challenge_id) is self:
                 del main.active_agents[self.challenge_id]

@@ -1,0 +1,32 @@
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["venv", ".pi", "node_modules", "frontend/dist", "keys", "keys-ops"]
+
+[tool.ruff.lint]
+# Broad `except Exception` is intentional across Argus: the agent loop must
+# never crash on a transient error, sandbox/shell cleanup is best-effort, and
+# the SSH bridges are deliberately resilient. Narrowing these would break the
+# "never crash / always clean up" guarantees, so BLE001 is disabled here.
+ignore = [
+  "BLE001",
+  "EXE002",  # files are stored on a FAT/exFAT mount where every file shows the
+              # exec bit; there is no meaningful shebang for library modules.
+]
+
+[tool.ruff.lint.flake8-bugbear]
+# fastapi.Depends(...) / File(...) / Form(...) in argument defaults is the
+# canonical FastAPI dependency-injection pattern (not a mutable default).
+# Treat these framework helpers as immutable so B008 does not fire.
+extend-immutable-calls = [
+  "fastapi.Depends",
+  "fastapi.Query",
+  "fastapi.File",
+  "fastapi.Form",
+  "fastapi.Body",
+  "fastapi.Header",
+  "fastapi.Path",
+  "fastapi.Cookie",
+  "fastapi.Security",
+  "fastapi.UploadFile",
+]

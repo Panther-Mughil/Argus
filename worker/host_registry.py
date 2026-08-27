@@ -15,7 +15,6 @@ from threading import Lock
 
 from backend.config import settings
 
-
 _HOSTS_CONFIG_PATH = Path(settings.ARGUS_HOSTS_PATH)
 if not _HOSTS_CONFIG_PATH.is_absolute():
     _HOSTS_CONFIG_PATH = Path(__file__).resolve().parent.parent / _HOSTS_CONFIG_PATH

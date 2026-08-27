@@ -1,6 +1,3 @@
-from pathlib import Path
-from typing import Optional
-
 import logging
 import shlex
 from pathlib import Path
@@ -8,6 +5,7 @@ from pathlib import Path
 import paramiko
 
 from backend.config import settings
+
 from .host_registry import acquire_host, release_host, select_host
 
 logger = logging.getLogger(__name__)
@@ -22,8 +20,8 @@ class SandboxManager:
     """
 
     def __init__(self) -> None:
-        self._client: Optional[paramiko.SSHClient] = None
-        self._host: Optional[dict] = None
+        self._client: paramiko.SSHClient | None = None
+        self._host: dict | None = None
         self._acquired: bool = False
 
     def _resolve_host(self) -> dict:
